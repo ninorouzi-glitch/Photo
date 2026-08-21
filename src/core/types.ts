@@ -39,6 +39,12 @@ export type Stats = {
   tint: number; // log2(G/√(R·B))
   clippedRatio: number; // Anteil der Pixel mit geclipptem Kanal, 0…1
   saturation: number; // 0…1
+  /**
+   * Mittleres L/max über dieselben Pixel wie `saturation`, mit deren Sättigung
+   * gewichtet. Kein Anzeigewert: der Umrechnungsfaktor zwischen dem Maß aus
+   * §8.3 und der Operation aus §9.5 (Herleitung bei `saturationFactor`).
+   */
+  satA: number; // 0…1
   sharpness: number; // kontrastnormiert
   noise: number; // kontrastnormiert
   palette: string[]; // 5 CSS-Farben

@@ -89,10 +89,28 @@ aber es wirft bei einem 24-MP-Foto rund 97 % der Pixel weg, bevor Instagram
 
 ## Zwei offene Vorbehalte
 
-**Sättigung** wird als `(max−min)/max` gemessen (§8.3), aber als `L + (c−L)·f`
-angewendet (§9.5). Das sind nicht dieselben Maße, die Konvergenz für Sättigung
-ist deshalb nur näherungsweise. Die Formeln bleiben wie spezifiziert; die
-Abnahme A-02 prüft für Sättigung nur die Richtung. Festgehalten in
+**Sättigung wird gemessen, bevor der Weißabgleich läuft.** Ein Farbstich liest
+sich in `(max−min)/max` als Sättigung: Testbild 03 (Blau × 1,35) misst 0,369 und
+ist kaum gesättigt. Der Weißabgleich nimmt den Stich weg — nach den LUTs steht
+dasselbe Bild bei 0,174 —, aber der Sättigungsfaktor wird gegen die 0,369
+gebildet und dann auf das entstichte Bild angewendet. Es wird ein zweites Mal
+entsättigt, auf 0,107. An synthetischen Stichen gemessen sinkt die Sättigung
+nach den LUTs um bis zu 58 %, im Extremfall kehrt sich die Aufgabe sogar um (vor
+den LUTs ist ein Verhältnis von 0,51 gefordert, danach eines von 1,21). Bei
+einem echten Set, dessen Bilder einander ohnehin ähneln, sind es rund 1 %.
+
+Die Umrechnung im nächsten Absatz behebt das nicht und macht es an einer Stelle
+sichtbarer, weil sich bisher zwei Fehler teilweise aufhoben: Der Faktor war zu
+schwach *und* er zielte auf einen aufgeblähten Messwert. Deshalb prüft A-02 die
+Sättigung weiter gegen einen Bruchteil der Ausgangsstreuung statt gegen die
+Schranke der übrigen Kriterien.
+
+Der Lösungsweg ist bekannt und gehört zu einer anderen Aufgabe: Sättigung ist
+aus Randverteilungen nicht rekonstruierbar, aus einer gemeinsamen schon.
+`palette()` baut bereits ein 8³-RGB-Gitter und wirft es weg; behält man dessen
+Zähler und Summen, lassen sich Sättigung und `satA` nach dem Weißabgleich aus
+512 Bin-Zentren schätzen. Dasselbe Gitter braucht die geplante
+Ausreißererkennung — beides gehört zusammen angegangen. Festgehalten in
 `src/core/apply.ts`.
 
 **Die Tonwertkurve trifft ihr Ziel nur näherungsweise**, auch bei Stärke 1.
@@ -106,7 +124,21 @@ erwartet und kein Fehler. Sauber lösen ließe es sich nur mit Luma-Matching
 unter Erhalt der Chroma, und das passt nicht mehr in eine Tabelle je Kanal —
 also auch nicht mehr in die 150 ms am Regler. Festgehalten in `src/core/lut.ts`.
 
-Zwei Präzisionsfehler an derselben Stelle waren dagegen behebbar und sind
+**Behoben: §8.3 und §9.5 sind verschiedene Größen.** Gemessen wird
+`(max−min)/max`, angewendet `L + (c−L)·f` — und `f` ist der Parameter der
+Operation, nicht das erreichte Verhältnis. Mit `a = L/max` je Pixel gilt nach
+der Operation exakt `S′/S = f / (a + (1−a)·f)`, also `f = r·a / (1 − r + r·a)`
+für ein gewünschtes Verhältnis `r`. Bis dahin stand dort schlicht `f = r`, was
+nur bei `a = 0` richtig wäre: übrig blieb eine systematische Unterkorrektur von
+rund 20 % der geforderten Änderung bei Stärke 1 und rund 43 % bei 0,7. `Stats`
+führt das `a` jetzt als `satA` mit, gewichtet mit der Sättigung des jeweiligen
+Pixels — ungewichtet bliebe drei Viertel des Fehlers stehen. Der Restfehler
+liegt unter einem Prozent; geprüft in `test/saettigung.test.ts`. Der Deckel aus
+§9.5 liegt seither auf dem Verhältnis statt auf `f`, weil ein Deckel auf `f` je
+nach Bildinhalt zwischen 0,70 und 0,60 wanderte. Nach oben begrenzt zusätzlich
+ein technischer Anschlag den Faktor — Gamut-Schutz, keine Vorgabe aus §9.5.
+
+Zwei Präzisionsfehler an der Tonwertkurve waren ebenfalls behebbar und sind
 behoben: Das Glättungsfenster der Kurve war an den Enden einseitig und zog
 Schwarz- und Weißpunkt nach innen — in jedem Bild etwas zu wenig Kontrast. Und
 die Inverse der Ziel-CDF wurde auf ganze Bins gerundet, mitten in einer Kette,

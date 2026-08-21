@@ -71,6 +71,28 @@ export function scaleChannels(src: Frame, kr: number, kg: number, kb: number): F
   return f;
 }
 
+/**
+ * Chroma um die Luminanz skaliert — die einzige Abweichung ist die Sättigung.
+ *
+ * L + (c−L)·g lässt die Luminanz jedes Pixels stehen, also auch Histogramm,
+ * Kontrast und Weißabgleich (bis auf die eine Rundung ins
+ * `Uint8ClampedArray`). Genau das unterscheidet dieses Paar von Bild 03 aus
+ * §13: dessen R × 0,85 / B × 1,35 verschiebt Belichtung, warmth und tint mit
+ * und liest sich obendrein als Sättigung.
+ */
+export function chromaScaled(src: Frame, g: number): Frame {
+  const f = createFrame(src.width, src.height);
+  for (let p = 0; p < src.data.length; p += 4) {
+    const r = src.data[p]!, gr = src.data[p + 1]!, b = src.data[p + 2]!;
+    const L = 0.2126 * r + 0.7152 * gr + 0.0722 * b;
+    f.data[p] = clamp(L + (r - L) * g);
+    f.data[p + 1] = clamp(L + (gr - L) * g);
+    f.data[p + 2] = clamp(L + (b - L) * g);
+    f.data[p + 3] = src.data[p + 3]!;
+  }
+  return f;
+}
+
 /** Kontrast um den Mittelwert 128, danach Sättigung um die Luminanz. */
 export function flatten(src: Frame, contrast: number, sat: number): Frame {
   const f = createFrame(src.width, src.height);
@@ -278,7 +300,8 @@ export function testSet(): { id: string; label: string; frame: Frame }[] {
 }
 
 /**
- * Drei Messfälle ohne Spec-Bezug, geprüft in test/stats.test.ts.
+ * Messfälle ohne Spec-Bezug, geprüft in test/stats.test.ts und
+ * test/saettigung.test.ts.
  *
  * Bewusst *neben* `testSet()` und nicht darin: A-02 und A-04 rechnen den
  * Zielwert als Median über das ganze Set. Ein geclipptes Band, ein hartes
@@ -287,9 +310,18 @@ export function testSet(): { id: string; label: string; frame: Frame }[] {
  * Konvergenzschranken etwas anderes messen als gemeint.
  */
 export function measurementSet(): { id: string; label: string; frame: Frame }[] {
+  // 09/10 sind ein Paar und nur zusammen brauchbar: gleiche Basisszene, gleiche
+  // Luminanz, gleicher Weißabgleich, allein die Chroma unterscheidet sie. Damit
+  // lässt sich die Sättigungsachse isoliert prüfen — am §13-Satz geht das
+  // nicht, weil dort Bild 03 mit seinem Blaustich zugleich die höchste gemessene
+  // Sättigung trägt (0,369, davon fast nichts echte Sättigung) und eine Prüfung
+  // an dieser Achse deshalb die WB-Wechselwirkung mitmisst statt der Konvergenz.
+  const base = baseScene(400, 500);
   return [
     { id: '06', label: 'Rotkanal am Anschlag', frame: clippedRed() },
     { id: '07', label: 'Streifen Periode 4', frame: stripes() },
     { id: '08', label: 'Vignette', frame: vignette() },
+    { id: '09', label: 'nur Sättigung, satt', frame: chromaScaled(base, 1.0) },
+    { id: '10', label: 'nur Sättigung, flau', frame: chromaScaled(base, 0.6) },
   ];
 }

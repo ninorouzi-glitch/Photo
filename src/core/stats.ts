@@ -35,7 +35,7 @@ export function analyze(f: Frame): Stats {
     warmth,
     tint,
     clippedRatio,
-    saturation: saturation(m, lum),
+    ...saturation(m, lum),
     sharpness: sharpness(lum, m.width, m.height, contrast),
     noise: noise(lum, m.width, m.height, contrast),
     palette: palette(m),
@@ -216,8 +216,25 @@ function whiteBalance(f: Frame, lum: Float32Array) {
 
 // ── §8.3 Sättigung ────────────────────────────────────────────────────────
 
-function saturation(f: Frame, lum: Float32Array): number {
-  let sum = 0, n = 0;
+/**
+ * Sättigung nach §8.3, und daneben `satA` — beides fällt in derselben Schleife
+ * an.
+ *
+ * `satA` ist das mittlere L/max, **mit der Sättigung des Pixels gewichtet**.
+ * Es ist kein Bildmerkmal für die Anzeige, sondern der Umrechnungsfaktor
+ * zwischen dem Maß aus §8.3 und der Operation aus §9.5; die Herleitung steht
+ * bei `saturationFactor` in `apply.ts`.
+ *
+ * Die Gewichtung ist nicht Feinschliff, sondern die Sache selbst. Der
+ * Fehlerbeitrag eines Pixels ist proportional zu seiner Sättigung: ein glatter
+ * Himmel liegt bei a ≈ 0,97, trägt zur gemessenen Sättigung aber fast nichts
+ * bei und darf den Mittelwert nicht bestimmen. Ungewichtet bleiben drei Viertel
+ * des Fehlers stehen — gemessen an der fotografischen Fixture 2,9…3,3 %
+ * Restfehler statt 0,01…0,19 % mit Gewichtung. Wer das zu einem schlichten
+ * Mittelwert vereinfacht, holt Abweichung Nr. 3 größtenteils zurück.
+ */
+function saturation(f: Frame, lum: Float32Array): { saturation: number; satA: number } {
+  let sum = 0, n = 0, sumA = 0;
   const d = f.data;
   for (let i = 0, p = 0; i < lum.length; i++, p += 4) {
     if (lum[i]! <= 20) continue;
@@ -228,10 +245,18 @@ function saturation(f: Frame, lum: Float32Array): number {
     const max = r > g ? (r > b ? r : b) : g > b ? g : b;
     if (max <= 0) continue;
     const min = r < g ? (r < b ? r : b) : g < b ? g : b;
-    sum += (max - min) / max;
+    const s = (max - min) / max;
+    sum += s;
+    sumA += (lum[i]! / max) * s;
     n++;
   }
-  return n === 0 ? 0 : sum / n;
+  // Boden 1 für das entartete Bild (kein zulässiges Pixel, oder alles neutral):
+  // a = 1 macht die Umrechnung in `saturationFactor` zur Identität, der Faktor
+  // ist dann wieder schlicht Ziel/Quelle.
+  return {
+    saturation: n === 0 ? 0 : sum / n,
+    satA: sum <= 0 ? 1 : sumA / sum,
+  };
 }
 
 // ── §8.4 Schärfe ──────────────────────────────────────────────────────────

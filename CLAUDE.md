@@ -64,7 +64,11 @@ luma distribution cannot answer. **Not** for per-channel histogram matching — 
 each channel onto its own target would itself be a white balance and would work against
 `channelGains`, leaving a doubly corrected, neutralised colour character. The tone curve
 is still built from the luma CDF alone. `clippedRatio` rides along: the share of pixels
-dropped by the per-channel clipping test.
+dropped by the per-channel clipping test. So does `satA` — the mean `L/max`
+**weighted by each pixel's saturation**, which is what converts the §8.3 measure
+into the §9.5 operator (deviation 3b). The weighting is the point: a smooth sky
+sits at `a ≈ 0.97` and contributes almost nothing to the measured saturation, so
+it must not decide the mean. Unweighted, three quarters of the error stays.
 
 **Store** (`src/state/store.ts`) — one object, `subscribe`/`set`. `target` and
 `deviations` are *derived* on every mutation, never hand-maintained. That is why
@@ -162,8 +166,8 @@ only — a ratio outside Instagram's band is cropped as asked, with a warning.
 
 ## Known, documented deviations — do not "fix" silently
 
-Four points where the code departs from the spec or falls short, each already
-argued in a comment at the site and in the README. If you change one, move the
+The points below are where the code departs from the spec or falls short, each
+already argued in a comment at the site and in the README. If you change one, move the
 argument with it.
 
 1. **Exposure metric** (`core/deviation.ts`): `max(4, …)` instead of the spec's
@@ -175,9 +179,41 @@ argument with it.
    default is now `output: 'original'`, which exports the crop at its native pixel
    size (a 1:1 blit, no resampling at all). `'1080'` remains as a user choice. Do not
    re-hardcode 1080 — `exportSize(ratio, output, source)` takes the source bitmap.
-3. **Saturation** (`core/apply.ts`): measured as `(max−min)/max` (§8.3) but applied
-   as `L + (c−L)·f` (§9.5). Not the same measure, so convergence is approximate;
-   A-02 therefore only checks direction for saturation.
+3. **Saturation measured before the white balance runs** (`core/apply.ts`). A
+   colour cast reads as saturation in `(max−min)/max`: §13's image 03 (B × 1.35)
+   measures 0.369 and has almost none. The white balance removes the cast — after
+   the LUTs the same image sits at 0.174 — but the factor is built from the
+   *pre-LUT* stats and then applied to the de-cast image, so it desaturates a
+   second time (down to 0.107). Measured on synthetic casts the post-LUT
+   saturation drops by up to 58 %, and in the extreme the sign of the task flips
+   (r = 0.51 before the LUTs, 1.21 after). On a real set whose images already
+   look alike it is ≈1 %.
+
+   The conversion in point 3b does **not** fix this and makes it visible in one
+   §13 case, because until now two errors partly cancelled: the factor was too
+   weak, and it was aimed at an inflated measurement. That is why A-02 still
+   checks saturation against a fraction of the initial spread instead of the
+   `(1−s)·before` bound the other criteria carry — it comes out at 0.114 against
+   0.112, and the 2 % missing are this and the §9.5 cap on image 04, not the
+   metric.
+
+   The fix is known and belongs with another task, not here: saturation cannot be
+   reconstructed from marginal distributions, but it can from a joint one.
+   `palette()` already builds an 8³ RGB grid and throws it away. Keeping its
+   counts/sums lets saturation *and* `satA` be estimated after the white balance
+   from 512 bin centres. The planned outlier detection needs the same grid — the
+   two should be done together.
+3b. **Saturation: §8.3 and §9.5 are different quantities** (`core/apply.ts`), and
+   the factor converts one into the other. With `a = L/max` per pixel, `L + (c−L)·f`
+   gives exactly `S′/S = f / (a + (1−a)·f)`, so `f = r·a / (1 − r + r·a)` for a
+   wanted ratio `r`. `f = r` — what the code did until now — is only right at
+   `a = 0`, and left a systematic undercorrection of ≈20 % of the required change
+   at strength 1, ≈43 % at 0.7. `Stats.satA` carries the `a`, weighted by each
+   pixel's saturation; the residual is now under 1 % (`test/saettigung.test.ts`).
+   Two things stay: `a` is a mean over a relation that is nonlinear in `a` (hence
+   under 1 % rather than zero), and `MAX_SAT_FACTOR` (2.0) caps `f` from above as
+   a **gamut** guard, not as §9.5 — that cap belongs to the clipping guard when it
+   arrives.
 4. **Tone matching is approximate by construction** (`core/lut.ts`). Two
    architectural reasons, neither of them a bug:
    - the curve is built from the **luma** CDF but applied to **each channel**

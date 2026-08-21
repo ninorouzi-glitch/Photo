@@ -58,6 +58,10 @@ export function computeTarget(stats: Stats[], anchor?: Stats | null): Stats {
     tint: of((s) => s.tint),
     clippedRatio: of((s) => s.clippedRatio),
     saturation: of((s) => s.saturation),
+    // Median wie jeder andere Messwert. Am Ziel wird `satA` nie gebraucht — der
+    // Faktor rechnet mit dem ā des Quellbildes —, aber `target` ist ein
+    // vollständiges `Stats` und bleibt es.
+    satA: of((s) => s.satA),
     sharpness: of((s) => s.sharpness),
     noise: of((s) => s.noise),
     palette: [],

@@ -106,9 +106,24 @@ describe('A-02 Konvergenz', () => {
     expect(after).toBeLessThan(before * 0.5);
   });
 
-  test('Sättigung: Reststreuung sinkt (Maß ≠ Anwendung, weite Toleranz)', () => {
-    // Gemessen wird (max−min)/max, angewendet L + (c−L)·f — nicht dasselbe Maß.
-    // Deshalb hier nur die Richtung geprüft, nicht der exakte Faktor.
+  test('Sättigung: Reststreuung sinkt', () => {
+    // Hier steht die Richtung, und zwar nicht als schwächere Prüfung, sondern
+    // als die zutreffende: eine Betragsschranke misst an dieser Achse am
+    // §13-Satz gar nicht die Konvergenz.
+    //
+    // Bild 03 misst 0,369 Sättigung und hat kaum welche — es ist der Blaustich
+    // (B × 1,35), der sich in (max−min)/max als Sättigung liest. Nach den LUTs
+    // allein steht dasselbe Bild bei 0,174, nach dem vollen Rezept bei 0,107:
+    // der Faktor wird gegen die 0,369 gebildet und entsättigt das entstichte
+    // Bild ein zweites Mal (Abweichung Nr. 3). Bild 04 ist flau und verlangt
+    // bei Stärke 0,7 ein Verhältnis von 2,7 gegen den Deckel 1,55 aus §9.5.
+    // Eine Betragsschranke prüfte hier also die Summe aus Konvergenz,
+    // WB-Wechselwirkung und Deckel; sie ergäbe 0,1141 gegen 0,1120 und schlüge
+    // an, ohne dass an der Umrechnung etwas falsch wäre.
+    //
+    // Der Betrag wird geprüft, nur woanders: `test/saettigung.test.ts` misst
+    // ihn mit 1-%-Schranke an Material mit bekannter Wahrheit — an Bildern, die
+    // sich ausschließlich in der Sättigung unterscheiden.
     const before = spread(stats.map((x) => x.saturation));
     const after = spread(corrected.map((x) => x.saturation));
     expect(after).toBeLessThan(before);

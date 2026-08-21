@@ -11,18 +11,66 @@ export type Recipe = {
 };
 
 /**
- * §9.5 Sättigung: Faktor (Ziel/Bild)^s, begrenzt auf 0,65…1,55.
+ * Technischer Anschlag auf f — Gamut-Schutz, **nicht** der Deckel aus §9.5.
  *
- * Vorbehalt, ausdrücklich festgehalten: gemessen wird Sättigung als
- * (max−min)/max (§8.3), angewendet wird sie als L + (c−L)·f. Das sind nicht
- * dieselben Maße — die Konvergenz für Sättigung ist deshalb nur näherungsweise.
- * Die Formel bleibt wie spezifiziert; die Abnahme A-02 trägt dafür eine
- * größere Toleranz, statt dass hier still etwas anderes gerechnet wird.
+ * L + (c−L)·f schiebt die Kanäle von der Luminanz weg und läuft nach oben aus
+ * 0…255 heraus; nach unten kann das nicht passieren, deshalb nur eine Grenze.
+ * Ohne Anschlag wächst f für stark gesättigte Bilder über jede Schranke: schon
+ * bei ā = 0,5 verlangt das Verhältnis 1,55 ein f von 3,44, bei ā = 0,4 eines
+ * von 8,86.
+ *
+ * Gemessen auf Flächen mit heller, gesättigter Farbe (max bis 235): bei f = 2,0
+ * verlassen 2,4…5,9 % der Kanäle den Bereich (bis zu 78 Codewerte darüber), bei
+ * 2,5 sind es 4,5…13,5 %, bei 3,0 dann 6,9…29,4 %. 2,0 deckt jedes Bild mit
+ * ā ≥ 0,70 verlustfrei ab und schneidet erst darunter. Fotografisches Material
+ * innerhalb 20…200 wandert bei 2,0 überhaupt nicht aus.
+ *
+ * Das ist eine grobe Grenze, weil sie den Bildinhalt nicht kennt. Die saubere
+ * Behandlung ist der Clipping-Guard aus Etappe 4, der pro Bild abschätzt, wie
+ * viel eine geplante Operation in die Schienen drückt — dort gehört dieser
+ * Anschlag hineingeführt und dann ersetzt.
+ */
+const MAX_SAT_FACTOR = 2.0;
+
+/**
+ * §9.5 Sättigung: Verhältnis (Ziel/Bild)^s, begrenzt auf 0,65…1,55; der
+ * Faktor f der Operation folgt daraus.
+ *
+ * Gemessen wird nach §8.3 als (max−min)/max, angewendet wird nach §9.5 als
+ * L + (c−L)·f. Das sind verschiedene Größen, und f ist der Parameter der
+ * Operation, nicht das erreichte Verhältnis. Mit a = L/max je Pixel gilt nach
+ * der Operation exakt
+ *
+ *     S′/S = f / (a + (1−a)·f),
+ *
+ * also nach f aufgelöst für ein gewünschtes Verhältnis r
+ *
+ *     f = r·a / (1 − r + r·a).
+ *
+ * `f = r` wäre nur bei a = 0 richtig — bei realen Bildern (a ≈ 0,8) blieb davon
+ * eine systematische Unterkorrektur von rund einem Fünftel der geforderten
+ * Änderung bei Stärke 1 und rund zwei Fünfteln bei 0,7. Mit der Umrechnung
+ * liegt der Restfehler unter einem Prozent (test/saettigung.test.ts).
+ *
+ * Der Deckel aus §9.5 liegt auf dem **Verhältnis**, nicht auf f: er begrenzt,
+ * wie weit ein Bild in seiner Anmutung verschoben werden darf, und das ist die
+ * sichtbare Sättigungsänderung. Ein Deckel auf f wanderte je nach Bildinhalt
+ * zwischen 0,70 und 0,60 und wäre keine Grenze.
+ *
+ * `a` ist ein Mittelwert, die Beziehung in a ist nichtlinear — die Konvergenz
+ * ist damit sehr genau, aber nicht exakt.
  */
 function saturationFactor(s: Stats, t: Stats, strength: number): number {
   if (s.saturation <= 0.001 || t.saturation <= 0.001) return 1;
-  const f = (t.saturation / s.saturation) ** strength;
-  return Math.max(0.65, Math.min(1.55, f));
+  const r = Math.max(0.65, Math.min(1.55, (t.saturation / s.saturation) ** strength));
+  const a = s.satA;
+  const nenner = 1 - r + r * a;
+  // Nenner ≤ 0 heißt: dieses Verhältnis ist mit diesem Operator nicht
+  // erreichbar (r ≥ 1/(1−a), bei a = 0,36 schon am Deckel 1,55). Dann gehört f
+  // an den technischen Anschlag, nicht an das Ergebnis einer Division durch
+  // fast null.
+  if (nenner <= 0.02) return r >= 1 ? MAX_SAT_FACTOR : 0.65;
+  return Math.min(MAX_SAT_FACTOR, (r * a) / nenner);
 }
 
 /**
