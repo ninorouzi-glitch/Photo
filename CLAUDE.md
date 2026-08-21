@@ -57,6 +57,15 @@ UI stage 03/04 → render.ts → crop.ts → apply.ts/lut.ts → pixels
                         exporter.ts → 1080px JPEG q92
 ```
 
+**Stats carries per-channel CDFs** (`cdfR`/`cdfG`/`cdfB`, next to the luma `cdf`) —
+falling out of the same measuring pass. They exist for one purpose: estimating how far
+a planned channel gain pushes pixels into the rails, which is a per-channel question a
+luma distribution cannot answer. **Not** for per-channel histogram matching — pulling
+each channel onto its own target would itself be a white balance and would work against
+`channelGains`, leaving a doubly corrected, neutralised colour character. The tone curve
+is still built from the luma CDF alone. `clippedRatio` rides along: the share of pixels
+dropped by the per-channel clipping test.
+
 **Store** (`src/state/store.ts`) — one object, `subscribe`/`set`. `target` and
 `deviations` are *derived* on every mutation, never hand-maintained. That is why
 stage 03 changes show up in stage 04 with no "Apply" step. `setItems` replaces the
@@ -115,6 +124,19 @@ only — a ratio outside Instagram's band is cropped as asked, with a warning.
   in one place. Derived from synthetic fixtures; meant to be re-tuned after the first
   twenty real sets.
 - `MEASURE_EDGE` (640), `MAX_PIXELS` (50MP), `MAX_IMAGES` (20) in `src/core/types.ts`.
+- `MEASURE_AREA` (0.8) / `MEASURE_INSET` (derived, ≈5.3 % per side) in `types.ts` — the
+  central share of the frame every global measurement runs on, so lens vignetting does
+  not drag brightness down; `aspect` is the one exception and still comes from the
+  whole image.
+- `MIN_CONTRAST` (4) in `types.ts` — one floor for both the clamped `contrast` value
+  and the contrast normalisation of sharpness and noise. Those must be the same number,
+  otherwise a flat image is normalised against a contrast it does not have.
+- `CLIP_HIGH` (250) / `CLIP_LOW` (5) in `src/core/stats.ts` — per-channel bounds beyond
+  which a pixel is not a usable colour sample (warmth, tint, saturation). Not a
+  saturation mask: saturated colours stay in as long as no channel is at the rail.
+- `SAMPLE_STEPS` ([7, 11, 13, 17]) in `stats.ts` — the palette sample walks the pixels
+  with the first of these that does not divide the frame width, so it cannot lock onto
+  a single column phase.
 - `PREVIEW_EDGE` (540) in `src/pipeline/render.ts`.
 
 ## Known, documented deviations — do not "fix" silently
@@ -138,11 +160,18 @@ argument with it.
 
 ## Tests
 
-- `test/fixtures/generate.ts` — the §13 test set, built from one deterministic base
-  scene with known deviations (±EV, channel scaling, blur, crop). Values stay in
-  20…200 so channel scaling never clips into saturation and skews the measurement.
-- `test/acceptance.test.ts` — A-01…A-04 against those fixtures.
-- `test/fixtures/write.test.ts` — writes the fixtures as PNGs to `test/fixtures/out/`
+- `test/fixtures/generate.ts` — two separate sets. `testSet()` is the §13 set, built
+  from one deterministic base scene with known deviations (±EV, channel scaling, blur,
+  crop); it stays at five images and values stay in 20…200 so channel scaling never
+  clips into saturation and skews the measurement. `measurementSet()` holds the
+  measurement fixtures (clipped red channel, period-4 stripes, vignette) and **must
+  never reach target computation**: a clipped band and a vignette are not photographs
+  from the same post, and in the set they drag the median and the initial spread far
+  enough that A-02's convergence bounds measure something other than convergence.
+- `test/acceptance.test.ts` — A-01…A-04 against `testSet()`.
+- `test/stats.test.ts` — the measurement fixes, each against its own fixture from
+  `measurementSet()`.
+- `test/fixtures/write.test.ts` — writes both sets as PNGs to `test/fixtures/out/`
   as a side effect of the test run, so the files can't go stale.
 - `e2e/performance.spec.ts` — the §13 budget. Lives in Playwright, not vitest,
   because Chrome throttles timers and `toBlob` in background tabs; it asserts

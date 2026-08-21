@@ -324,7 +324,7 @@ function noise(lum: Float32Array, w: number, h: number, contrast: number): numbe
  */
 const SAMPLE_STEPS = [7, 11, 13, 17];
 
-function sampleStep(width: number): number {
+export function sampleStep(width: number): number {
   return SAMPLE_STEPS.find((p) => width % p !== 0) ?? 1;
 }
 

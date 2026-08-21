@@ -37,6 +37,10 @@ export const CRITERIA: Criterion[] = [
  * Normalfall zu verzerren; gemessen: −1,208.
  */
 export function exposureDelta(p50: number, target: number): number {
+  // Diese 4 ist der Tonwert-Offset aus §10 und ausdrücklich *nicht* MIN_CONTRAST,
+  // auch wenn dieselbe Zahl gleich darunter als Konstante steht. Sie gehört zur
+  // dokumentierten Abweichung Nr. 1 (siehe CLAUDE.md); zieht jemand die beiden
+  // zusammen, hängt A-01 an einem Tuning-Punkt, der von Kontrast handelt.
   return Math.log2(Math.max(4, p50) / Math.max(4, target));
 }
 

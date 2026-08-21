@@ -161,6 +161,94 @@ function gaussKernel(sigma: number): number[] {
   return k.map((v) => v / sum);
 }
 
+
+/**
+ * Große Fläche mit Rotkanal am Anschlag, bei mittlerem Luma.
+ *
+ * Der Hintergrund ist exakt neutral (R = G = B), der wahre Illuminant also
+ * warmth = 0. Das Band in der Bildmitte steht mit R = 255 am Anschlag, hat aber
+ * L ≈ 85 und käme durch einen reinen Luma-Filter glatt durch. Genau das soll der
+ * kanalweise Ausschluss abfangen.
+ *
+ * 512 × 640 ist bewusst unter MEASURE_EDGE: so misst `analyzeFull` ohne
+ * Verkleinerung, und der geclippte Anteil ist exakt abzählbar.
+ */
+export function clippedRed(width = 512, height = 640): Frame {
+  const f = createFrame(width, height);
+  const rand = rng(20260822);
+  const d = f.data;
+
+  for (let y = 0; y < height; y++) {
+    const base = 60 + (80 * y) / (height - 1);
+    const inBand = y >= height * 0.3 && y < height * 0.6;
+    for (let x = 0; x < width; x++) {
+      const v = base + 6 * Math.sin(x * 0.8) + 3 * (rand() - 0.5);
+      const p = (y * width + x) * 4;
+      if (inBand) {
+        d[p] = 255; d[p + 1] = 40; d[p + 2] = 30;
+      } else {
+        d[p] = clamp(v); d[p + 1] = clamp(v); d[p + 2] = clamp(v);
+      }
+      d[p + 3] = 255;
+    }
+  }
+  return f;
+}
+
+/**
+ * Senkrechte Streifen mit Periode 4: je zwei Spalten Rot, zwei Spalten Blau.
+ *
+ * Der Fall, an dem eine feste, gerade Schrittweite in der Palette-Stichprobe
+ * auffliegt — sie trifft dann nur eine der beiden Spaltengruppen. Bewusst ohne
+ * Textur und ohne Verlauf: die Palette soll aus genau zwei Farbtöpfen bestehen,
+ * damit fehlt oder da ist eindeutig ist. 640 × 640 bleibt unverkleinert.
+ */
+export const STRIPE_A: [number, number, number] = [190, 50, 50];
+export const STRIPE_B: [number, number, number] = [50, 60, 190];
+
+export function stripes(width = 640, height = 640): Frame {
+  const f = createFrame(width, height);
+  const d = f.data;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const c = (x >> 1) & 1 ? STRIPE_B : STRIPE_A;
+      const p = (y * width + x) * 4;
+      d[p] = c[0]; d[p + 1] = c[1]; d[p + 2] = c[2]; d[p + 3] = 255;
+    }
+  }
+  return f;
+}
+
+/** Der unvignettierte Sollwert von `vignette()`. */
+export const VIGNETTE_BASE = 140;
+
+/**
+ * Gleichmäßige Fläche mit synthetischer Vignette.
+ *
+ * Der Abfall geht mit der vierten Potenz des normierten Radius — grob die Form
+ * einer Objektivvignettierung: in der Mitte flach, zu den Ecken hin steil. Ohne
+ * Messfenster zieht das den Median unter VIGNETTE_BASE.
+ */
+export function vignette(width = 512, height = 640): Frame {
+  const f = createFrame(width, height);
+  const rand = rng(20260823);
+  const d = f.data;
+  const cx = (width - 1) / 2;
+  const cy = (height - 1) / 2;
+  const half = Math.hypot(cx, cy);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const r = Math.hypot(x - cx, y - cy) / half;
+      // Feinstruktur nur, damit der Median nicht auf einem einzigen Bin klebt.
+      const v = (VIGNETTE_BASE + 2 * (rand() - 0.5)) * (1 - 0.6 * r ** 4);
+      const p = (y * width + x) * 4;
+      d[p] = clamp(v); d[p + 1] = clamp(v); d[p + 2] = clamp(v); d[p + 3] = 255;
+    }
+  }
+  return f;
+}
+
 /** Die fünf Testbilder aus §13. */
 export function testSet(): { id: string; label: string; frame: Frame }[] {
   const base = baseScene();
@@ -171,5 +259,22 @@ export function testSet(): { id: string; label: string; frame: Frame }[] {
     { id: '03', label: 'dunkel & kühl', frame: scaleChannels(base, dark * 0.85, dark, dark * 1.35) },
     { id: '04', label: 'flau', frame: flatten(base, 0.55, 0.45) },
     { id: '05', label: 'quer & rauschig', frame: addNoise(blur(crop(base, 0, 250, 800, 450), 1.5), 10) },
+  ];
+}
+
+/**
+ * Drei Messfälle ohne Spec-Bezug, geprüft in test/stats.test.ts.
+ *
+ * Bewusst *neben* `testSet()` und nicht darin: A-02 und A-04 rechnen den
+ * Zielwert als Median über das ganze Set. Ein geclipptes Band, ein hartes
+ * Streifenmuster und eine Vignette sind keine Bilder desselben Posts — im Set
+ * verschieben sie den Median und die Ausgangsstreuung so weit, dass die
+ * Konvergenzschranken etwas anderes messen als gemeint.
+ */
+export function measurementSet(): { id: string; label: string; frame: Frame }[] {
+  return [
+    { id: '06', label: 'Rotkanal am Anschlag', frame: clippedRed() },
+    { id: '07', label: 'Streifen Periode 4', frame: stripes() },
+    { id: '08', label: 'Vignette', frame: vignette() },
   ];
 }
