@@ -90,11 +90,20 @@ export type Settings = {
   fixes: Fixes;
 };
 
-/** Die sieben Kriterien der Befundmatrix (§10), in Anzeigereihenfolge. */
+/**
+ * Die Kriterien der Befundmatrix (§10), in Anzeigereihenfolge.
+ *
+ * `tint` steht nicht in §10. Es wird seit jeher gemessen (§8.3) und in
+ * `channelGains` auch korrigiert, hatte aber keine Schwelle und tauchte in
+ * keiner Anzeige auf: ein Bild, das deutlich ins Grüne oder Magenta kippt,
+ * meldete nichts. Es steht direkt neben `warmth`, weil beide aus derselben
+ * Messung stammen und dieselbe Korrektur teilen.
+ */
 export type Criterion =
   | 'aspect'
   | 'exposure'
   | 'warmth'
+  | 'tint'
   | 'contrast'
   | 'saturation'
   | 'sharpness'

@@ -19,7 +19,7 @@ export function render(root: HTMLElement, ctx: Ctx): void {
     el('h2', { text: 'Befund' }),
     el('p', {
       class: 'sub',
-      text: `Sieben Kriterien, gemessen gegen ${referenceName}. Zeiger oder Tastaturfokus auf eine Zelle zeigt den Zahlenwert.`,
+      text: `Acht Kriterien, gemessen gegen ${referenceName}. Zeiger oder Tastaturfokus auf eine Zelle zeigt den Zahlenwert.`,
     }),
     matrix(items, devs),
     el('div', { class: 'legend' },

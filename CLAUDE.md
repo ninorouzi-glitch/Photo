@@ -122,7 +122,9 @@ only — a ratio outside Instagram's band is cropped as asked, with a warning.
 
 - `THRESHOLDS` in `src/core/deviation.ts` — the whole warn/crit matrix, deliberately
   in one place. Derived from synthetic fixtures; meant to be re-tuned after the first
-  twenty real sets.
+  twenty real sets. The `tint` row is the exception: it is not measured against §13
+  but derived from the `warmth` row via the 2/3 damping in `channelGains`, and is
+  marked provisional at the site. Re-tune it first.
 - `MEASURE_EDGE` (640), `MAX_PIXELS` (50MP), `MAX_IMAGES` (20) in `src/core/types.ts`.
 - `MEASURE_AREA` (0.8) / `MEASURE_INSET` (derived, ≈5.3 % per side) in `types.ts` — the
   central share of the frame every global measurement runs on, so lens vignetting does
@@ -141,7 +143,7 @@ only — a ratio outside Instagram's band is cropped as asked, with a warning.
 
 ## Known, documented deviations — do not "fix" silently
 
-Three points where the code departs from the spec or falls short, each already
+Four points where the code departs from the spec or falls short, each already
 argued in a comment at the site and in the README. If you change one, move the
 argument with it.
 
@@ -157,6 +159,28 @@ argument with it.
 3. **Saturation** (`core/apply.ts`): measured as `(max−min)/max` (§8.3) but applied
    as `L + (c−L)·f` (§9.5). Not the same measure, so convergence is approximate;
    A-02 therefore only checks direction for saturation.
+4. **Tone matching is approximate by construction** (`core/lut.ts`). Two
+   architectural reasons, neither of them a bug:
+   - the curve is built from the **luma** CDF but applied to **each channel**
+     through the same table, so a coloured image never lands exactly on the
+     luma target it was fitted to;
+   - the **white balance runs before the curve** — the gains shift the
+     distribution the curve was fitted against, so the curve sees different
+     input than it was built for.
+
+   Consequence: `exposure`, `contrast`, `p01` and `p99` keep a systematic
+   residual even at strength 1. On the §13 set, tone-curve-only at strength 1,
+   the mean residual is ≈0.8 code values on p01 and ≈2.1 on p99. **That is
+   expected. Do not read it as a defect and do not chase it with tighter
+   thresholds.**
+
+   The only real fix is luma matching with chroma preserved — which cannot be
+   folded into one table per channel, costs the LUT collapse in `buildLuts`,
+   and with it the 150 ms slider budget. Not worth it. The two precision errors
+   that *were* worth fixing (edge-tapered smoothing window, interpolated
+   inverse) are already fixed and guarded by `test/lut.test.ts`; that test
+   measures the curve against a fixture with a known ground-truth mapping, and
+   it is the place to check whether a change to `toneCurve` helps or hurts.
 
 ## Tests
 

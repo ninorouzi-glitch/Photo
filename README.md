@@ -87,16 +87,41 @@ aber es wirft bei einem 24-MP-Foto rund 97 % der Pixel weg, bevor Instagram
 überhaupt etwas davon sieht. Umgesetzt ist die volle Auflösung als Standard und
 1080 px als Wahl. Siehe `src/pipeline/render.ts`.
 
-## Ein offener Vorbehalt
+## Zwei offene Vorbehalte
 
-Sättigung wird als `(max−min)/max` gemessen (§8.3), aber als `L + (c−L)·f`
+**Sättigung** wird als `(max−min)/max` gemessen (§8.3), aber als `L + (c−L)·f`
 angewendet (§9.5). Das sind nicht dieselben Maße, die Konvergenz für Sättigung
 ist deshalb nur näherungsweise. Die Formeln bleiben wie spezifiziert; die
 Abnahme A-02 prüft für Sättigung nur die Richtung. Festgehalten in
 `src/core/apply.ts`.
+
+**Die Tonwertkurve trifft ihr Ziel nur näherungsweise**, auch bei Stärke 1.
+Zwei bauliche Gründe: Sie wird aus der Luma-CDF gebaut, aber über dieselbe
+Tabelle auf jeden Kanal angewendet — ein farbiges Bild landet damit nie exakt
+auf dem Luma-Ziel. Und der Weißabgleich läuft vor ihr (§9.2) und verschiebt
+genau die Verteilung, gegen die sie angepasst wurde. Die Achsen Belichtung,
+Kontrast, p01 und p99 behalten deshalb einen systematischen Restwert; am
+§13-Satz sind das im Mittel rund 0,8 Tonwerte auf p01 und 2,1 auf p99. Das ist
+erwartet und kein Fehler. Sauber lösen ließe es sich nur mit Luma-Matching
+unter Erhalt der Chroma, und das passt nicht mehr in eine Tabelle je Kanal —
+also auch nicht mehr in die 150 ms am Regler. Festgehalten in `src/core/lut.ts`.
+
+Zwei Präzisionsfehler an derselben Stelle waren dagegen behebbar und sind
+behoben: Das Glättungsfenster der Kurve war an den Enden einseitig und zog
+Schwarz- und Weißpunkt nach innen — in jedem Bild etwas zu wenig Kontrast. Und
+die Inverse der Ziel-CDF wurde auf ganze Bins gerundet, mitten in einer Kette,
+die sonst durchgehend in Fließkomma rechnet. An einem Testbild mit bekannter
+Wahrheit fiel der mittlere Kurvenfehler dadurch von 0,105 auf 0,033 Tonwerte,
+am Rand von 2,59 auf 0,30. Geprüft in `test/lut.test.ts`.
 
 ## Schwellen nachjustieren
 
 Die Werte in `THRESHOLDS` (`src/core/deviation.ts`) stammen aus Messungen an
 synthetischen Bildern. Sie stehen bewusst an einer Stelle und sollten nach den
 ersten zwanzig echten Sets nachgezogen werden (§10).
+
+Eine Zeile ist dabei vordringlich: `tint` ist neu in der Befundmatrix — bis
+hierher wurde der Grün-Magenta-Stich gemessen und korrigiert, aber nirgends
+angezeigt. Seine Schwellen (0,05 / 0,12) sind als einzige nicht an §13 gemessen,
+sondern aus den `warmth`-Schwellen über die 2/3-Dämpfung in `channelGains`
+hergeleitet. Sie sind ausdrücklich vorläufig.

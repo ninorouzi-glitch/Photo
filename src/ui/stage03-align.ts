@@ -6,8 +6,8 @@ import { drawOriginalTo, previewScale, previewSize, renderTo } from '../pipeline
 import type { Ctx } from './ctx.ts';
 import { clear, el } from './dom.ts';
 
-/** F-18: die sechs tonalen Kriterien — das Format hängt am Zuschnitt, nicht an der Korrektur. */
-const TONAL: Criterion[] = ['exposure', 'warmth', 'contrast', 'saturation', 'sharpness', 'noise'];
+/** F-18: die tonalen Kriterien — das Format hängt am Zuschnitt, nicht an der Korrektur. */
+const TONAL: Criterion[] = ['exposure', 'warmth', 'tint', 'contrast', 'saturation', 'sharpness', 'noise'];
 
 const RATIO_LABEL: Record<Ratio, string> = {
   '4:5': '4:5',

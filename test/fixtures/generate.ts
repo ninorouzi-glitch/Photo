@@ -249,7 +249,22 @@ export function vignette(width = 512, height = 640): Frame {
   return f;
 }
 
-/** Die fünf Testbilder aus §13. */
+/**
+ * Die fünf Testbilder aus §13.
+ *
+ * Zu Bild 03 „dunkel & kühl": die Skalierung R×0,85 / B×1,35 ist *keine* reine
+ * Warm-Kalt-Verschiebung. Eine solche hielte R·B konstant; hier ist
+ * R·B = 1,1475 gegen unverändertes G, und das ist ein echter leichter
+ * Magentastich — tint = −log2(√1,1475) ≈ −0,099, also seit der Einführung der
+ * tint-Achse sichtbar als warn. Das ist korrekt gemessen und kein Übersprechen
+ * zwischen warmth und tint: die beiden Achsen stehen im Log-Raum senkrecht
+ * aufeinander (warmth misst log R − log B, tint log G − (log R + log B)/2), und
+ * eine reine Warm-Kalt-Verschiebung lässt tint nachweislich in Ruhe — geprüft
+ * in `test/deviation.test.ts`.
+ *
+ * Das Fixture deshalb NICHT „geradeziehen". Jede Änderung an diesen Faktoren
+ * verschiebt sämtliche Baselines der Abnahmen A-01…A-04.
+ */
 export function testSet(): { id: string; label: string; frame: Frame }[] {
   const base = baseScene();
   const dark = 2 ** -1.2;

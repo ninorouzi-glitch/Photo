@@ -16,6 +16,27 @@ export const THRESHOLDS: Record<Criterion, { warn: number; crit: number }> = {
   aspect: { warn: 0.06, crit: 0.2 },
   exposure: { warn: 0.18, crit: 0.45 },
   warmth: { warn: 0.07, crit: 0.18 },
+  /**
+   * VORLÄUFIG — anders als die übrigen Zeilen nicht an §13 gemessen, sondern
+   * aus den warmth-Schwellen hergeleitet. Nach den ersten echten Sets als
+   * erstes hier nachjustieren.
+   *
+   * Warum nicht dieselben Zahlen wie warmth: `channelGains` wendet tint mit
+   * dem Faktor 2/3 gedämpft an, warmth ungedämpft. Ein tint-Wert von x bewegt
+   * die Kanäle also nur so weit wie ein warmth-Wert von 2/3·x — dieselbe Zahl
+   * bedeutet in tint eine kleinere tatsächliche Korrektur. Damit die Anzeige
+   * denselben Maßstab behält, liegen die Schwellen bei 2/3 der warmth-Werte:
+   * 2/3 · 0,07 ≈ 0,05 und 2/3 · 0,18 = 0,12.
+   *
+   * Die Geometrie der Kanalfaktoren zeigt in dieselbe Richtung, wenn auch
+   * weiter: warmth verteilt sein dW auf zwei Kanäle (je ±dW/2), tint legt sein
+   * dT ganz auf Grün. Ein tint-Schritt greift am einzelnen Kanal doppelt so
+   * weit ein wie ein warmth-Schritt derselben Größe; die Dämpfung nimmt davon
+   * einen Teil zurück, nicht alles. Auffallen dürfte ein Grünstich also eher
+   * noch früher als bei 0,05 — deshalb hier die vorsichtigere Herleitung und
+   * kein Wert unter 2/3.
+   */
+  tint: { warn: 0.05, crit: 0.12 },
   contrast: { warn: 0.24, crit: 0.52 },
   saturation: { warn: 0.18, crit: 0.4 },
   sharpness: { warn: 0.5, crit: 1.1 },
@@ -23,7 +44,7 @@ export const THRESHOLDS: Record<Criterion, { warn: number; crit: number }> = {
 };
 
 export const CRITERIA: Criterion[] = [
-  'aspect', 'exposure', 'warmth', 'contrast', 'saturation', 'sharpness', 'noise',
+  'aspect', 'exposure', 'warmth', 'tint', 'contrast', 'saturation', 'sharpness', 'noise',
 ];
 
 /**
@@ -52,6 +73,8 @@ export function deviationValues(s: Stats, t: Stats): Record<Criterion, number> {
     aspect: Math.log2(s.aspect / t.aspect),
     exposure: exposureDelta(s.p50, t.p50),
     warmth: s.warmth - t.warmth,
+    // Wie warmth eine schlichte Differenz: tint ist bereits ein log2-Verhältnis.
+    tint: s.tint - t.tint,
     contrast: ratio(s.contrast, t.contrast, MIN_CONTRAST),
     saturation: ratio(s.saturation, t.saturation, 0.004),
     sharpness: 0.5 * ratio(s.sharpness, t.sharpness, 0.05),

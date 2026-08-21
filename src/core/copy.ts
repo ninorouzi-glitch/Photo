@@ -5,17 +5,69 @@ export const CRITERION_LABEL: Record<Criterion, string> = {
   aspect: 'Format',
   exposure: 'Belichtung',
   warmth: 'Weißabgleich',
+  tint: 'Grün-Magenta-Stich',
   contrast: 'Kontrast',
   saturation: 'Sättigung',
   sharpness: 'Schärfe',
   noise: 'Rauschen',
 };
 
+/**
+ * Grammatisches Geschlecht der Beschriftungen.
+ *
+ * Steht getrennt von `CRITERION_LABEL`, weil es nicht am Text hängt, sondern am
+ * Begriff: wer eine Beschriftung umformuliert, muss hier mitziehen, und das
+ * fällt an dieser Stelle auf.
+ */
+export type Genus = 'm' | 'f' | 'n';
+
+export const CRITERION_GENUS: Record<Criterion, Genus> = {
+  aspect: 'n', // das Format
+  exposure: 'f', // die Belichtung
+  warmth: 'm', // der Weißabgleich
+  tint: 'm', // der Grün-Magenta-Stich
+  contrast: 'm', // der Kontrast
+  saturation: 'f', // die Sättigung
+  sharpness: 'f', // die Schärfe
+  noise: 'n', // das Rauschen
+};
+
+/**
+ * Die beiden Fälle, in denen die Kriterien in Sätzen vorkommen: Subjekt
+ * („der Weißabgleich streut") und direktes Objekt („zieht den Weißabgleich
+ * nach"). Dativ und Genitiv gibt es hier bewusst nicht — sobald ein Satz sie
+ * bräuchte, gehört der Fall hier ergänzt und nicht im Satz umschifft.
+ */
+export type Kasus = 'nom' | 'akk';
+
+const ARTIKEL: Record<Genus, Record<Kasus, string>> = {
+  m: { nom: 'der', akk: 'den' },
+  f: { nom: 'die', akk: 'die' },
+  n: { nom: 'das', akk: 'das' },
+};
+
+/** Der bestimmte Artikel zum Kriterium, allein. */
+export function artikel(c: Criterion, kasus: Kasus = 'nom'): string {
+  return ARTIKEL[CRITERION_GENUS[c]][kasus];
+}
+
+/**
+ * Kriterium mit bestimmtem Artikel, satzfertig: „der Weißabgleich",
+ * „das Format", „den Kontrast".
+ *
+ * Bis hierher stand in `lesson()` fest verdrahtet „die" vor jeder Beschriftung
+ * — bei vier der acht Kriterien falsch, und mit `tint` wären es fünf gewesen.
+ */
+export function mitArtikel(c: Criterion, kasus: Kasus = 'nom'): string {
+  return `${artikel(c, kasus)} ${CRITERION_LABEL[c]}`;
+}
+
 /** Richtungswörter: [Wert > 0, Wert < 0]. */
 const DIRECTION: Record<Criterion, [string, string]> = {
   aspect: ['breiter', 'höher'],
   exposure: ['heller', 'dunkler'],
   warmth: ['wärmer', 'kühler'],
+  tint: ['grünstichiger', 'magentastichiger'],
   contrast: ['kräftiger', 'flacher'],
   saturation: ['farbiger', 'blasser'],
   sharpness: ['schärfer', 'weicher'],
@@ -83,7 +135,7 @@ export function findings(
  * Der rohe Betrag taugt hier nicht: Rauschen wird in Einheiten um 8 gemessen,
  * Weißabgleich in Einheiten um 0,6. Nach Betrag sortiert stünde jede
  * Rauschabweichung vor jedem Farbstich, egal wie deutlich der ist. Erst die
- * Normierung auf die Schwelle macht die sieben Kriterien vergleichbar.
+ * Normierung auf die Schwelle macht die acht Kriterien vergleichbar.
  */
 function severity(c: Criterion, d: { value: number }): number {
   return Math.abs(d.value) / THRESHOLDS[c].warn;
@@ -96,7 +148,7 @@ function join(parts: string[]): string {
 
 /** F-08: ein Set ohne Auffälligkeiten bekommt einen Satz, keinen leeren Kasten. */
 export const ALL_CLEAR =
-  'Das Set ist bereits einheitlich — kein Bild fällt bei einem der sieben Kriterien aus der Reihe.';
+  'Das Set ist bereits einheitlich — kein Bild fällt bei einem der acht Kriterien aus der Reihe.';
 
 /**
  * F-09: P4 verlangt, Grenzen zu benennen statt sie zu überspielen. Unschärfe
@@ -122,6 +174,7 @@ const LESSON: Record<Criterion, string> = {
   aspect: 'Schneide schon beim Fotografieren auf ein Format zu, oder lass genug Rand für den späteren Beschnitt — dann bestimmt nicht der Zuschnitt, was im Bild bleibt.',
   exposure: 'Belichte die Bilder einer Serie gleich: fester Blendenwert und feste Belichtungszeit statt Automatik, oder gleiche die Belichtung in Affinity vor dem Export an.',
   warmth: 'Stell den Weißabgleich fest ein statt auf Automatik. Die Automatik reagiert auf jede Farbfläche im Bild und driftet dadurch von Aufnahme zu Aufnahme.',
+  tint: 'Ein Grün- oder Magentastich kommt fast immer aus dem Licht: Leuchtstofflampen, billige LEDs, oder Sonne durch grünes Blattwerk. Fotografier eine Serie in einer Lichtsituation und stell den Weißabgleich einmal auf ein neutrales Grau ein, statt ihn Bild für Bild zu raten.',
   contrast: 'Zieh die Tonwertkurve nicht bei jedem Bild neu nach Gefühl. Leg sie einmal fest und wende sie auf die ganze Serie an.',
   saturation: 'Sättigung addiert sich schnell auf. Prüf die Bilder einer Serie nebeneinander statt einzeln — allein sieht kräftiger fast immer besser aus.',
   sharpness: 'Achte auf gleichmäßige Schärfe: dieselbe Blende, derselbe Fokuspunkt, und schärfe beim Export für alle Bilder gleich stark.',
@@ -140,7 +193,7 @@ export function lesson(all: Deviations[]): { criterion: Criterion; text: string 
   const factor = spread / THRESHOLDS[criterion].warn;
   const lead =
     factor < 1
-      ? `Am weitesten streut in diesem Set die ${CRITERION_LABEL[criterion]} — noch im grünen Bereich.`
-      : `Am weitesten streut in diesem Set die ${CRITERION_LABEL[criterion]} (Spanne ${num(spread)}).`;
+      ? `Am weitesten streut in diesem Set ${mitArtikel(criterion)} — noch im grünen Bereich.`
+      : `Am weitesten streut in diesem Set ${mitArtikel(criterion)} (Spanne ${num(spread)}).`;
   return { criterion, text: `${lead} ${LESSON[criterion]}` };
 }

@@ -54,14 +54,48 @@ export function channelGains(s: Stats, t: Stats, strength: number) {
  * Diese eine Kurve erledigt Belichtung, Schwarz-/Weißpunkt und Kontrast
  * gemeinsam. Deshalb gibt es dafür nur einen Schalter und nicht drei: als
  * getrennte Schritte würden sie einander überschreiben.
+ *
+ * BEKANNTE GRENZE, kein Fehler: die Anpassung trifft ihr Ziel auch bei Stärke 1
+ * nur näherungsweise. Zwei Gründe, beide baulich:
+ *  - Die Kurve wird aus der *Luma*-CDF gebaut, aber über dieselbe Tabelle auf
+ *    *jeden Kanal* angewendet. Ein farbiges Bild landet damit nie exakt auf dem
+ *    Luma-Ziel, gegen das die Kurve angepasst wurde.
+ *  - Der Weißabgleich läuft *vor* der Kurve (§9.2) und verschiebt genau die
+ *    Verteilung, gegen die sie angepasst wurde — die Kurve sieht am Ende eine
+ *    andere Eingabe als die, für die sie gebaut ist.
+ * Deshalb behalten die Achsen exposure, contrast, p01 und p99 einen
+ * systematischen Restwert. Zu beheben wäre das nur mit Luma-Matching unter
+ * Erhalt der Chroma; das ließe sich nicht mehr in eine Tabelle je Kanal falten
+ * und kostete das 150-ms-Budget. Siehe CLAUDE.md, Abweichung 4.
  */
 export function toneCurve(srcCdf: Float64Array, dstCdf: Float64Array, strength: number): Float64Array {
   const mapped = new Float64Array(256);
   let j = 0;
   for (let i = 0; i < 256; i++) {
-    const q = srcCdf[i]!;
+    // Beide Seiten in derselben Konvention wie `percentile` in stats.ts: die
+    // Masse eines Bins liegt gleichmäßig über [i−0,5 … i+0,5], also ist cdf[i]
+    // die Masse bis zur *Oberkante* von Bin i. Für die Mitte von Bin i ist das
+    // Quantil deshalb das Mittel aus cdf[i−1] und cdf[i].
+    const q = ((i > 0 ? srcCdf[i - 1]! : 0) + srcCdf[i]!) / 2;
     while (j < 255 && dstCdf[j]! < q) j++;
-    mapped[i] = j;
+
+    // Und dieselbe Konvention rückwärts: q liegt zwischen der Unterkante
+    // (j−0,5, Masse dstCdf[j−1]) und der Oberkante (j+0,5, Masse dstCdf[j]).
+    // Das ganzzahlige `j` von früher quantisierte die Inverse auf ±0,5 Stufen
+    // — mitten in einer Kette, die sonst durchgehend in Fließkomma rechnet.
+    //
+    // Nur eine der beiden Seiten zu interpolieren ist schlechter als keine:
+    // das alte `mapped[i] = j` paarte die Oberkante des Quellbins mit der
+    // Mitte des Zielbins, zwei halbe Stufen, die einander weitgehend aufhoben.
+    // Wird nur die Zielseite genau gerechnet, bleibt der halbe Schritt der
+    // Quellseite als systematischer Versatz stehen — gemessen an einem
+    // Testbild mit bekannter Wahrheit wurde die Kurve dadurch schlechter
+    // statt besser. Deshalb beide Seiten oder keine.
+    const lo = j > 0 ? dstCdf[j - 1]! : 0;
+    const d = dstCdf[j]! - lo;
+    mapped[i] = d > 0
+      ? Math.max(0, Math.min(255, j - 0.5 + (q - lo) / d))
+      : j;
   }
 
   // 1. Deckeln
@@ -69,15 +103,21 @@ export function toneCurve(srcCdf: Float64Array, dstCdf: Float64Array, strength: 
     mapped[i] = Math.max(i - 70, Math.min(i + 70, mapped[i]!));
   }
 
-  // 2. Glätten, gleitendes Mittel über ±6 Bins
+  // 2. Glätten, gleitendes Mittel über ±6 Bins, zum Rand hin verjüngt
+  //
+  // Ein festes Fenster ist an den Enden einseitig: bei i=0 mittelt es über die
+  // Bins 0…6 und zieht damit genau den Endpunkt nach innen. Dort sitzen aber
+  // p01 und p99, und der Fehler ist systematisch — p01 zu hoch, p99 zu
+  // niedrig, also durchgehend etwas zu wenig Kontrast in jedem Bild. Ein
+  // symmetrisch mitschrumpfendes Fenster (bei i=0 nur [0], bei i=1 [0…2], ab
+  // i=6 das volle ±6) hält die Endpunkte exakt und glättet weiter dort, wo es
+  // gebraucht wird.
   const smooth = new Float64Array(256);
-  const R = 6;
   for (let i = 0; i < 256; i++) {
+    const R = Math.min(6, i, 255 - i);
     let sum = 0, n = 0;
     for (let k = -R; k <= R; k++) {
-      const idx = i + k;
-      if (idx < 0 || idx > 255) continue;
-      sum += mapped[idx]!;
+      sum += mapped[i + k]!;
       n++;
     }
     smooth[i] = sum / n;

@@ -2,8 +2,17 @@ import { describe, expect, test } from 'vitest';
 import { testSet } from './fixtures/generate.ts';
 import { analyzeFull } from '../src/core/stats.ts';
 import { computeTarget } from '../src/core/target.ts';
-import { deviations } from '../src/core/deviation.ts';
-import { ALL_CLEAR, blurWarning, findings, formatValue, lesson } from '../src/core/copy.ts';
+import { CRITERIA, deviations } from '../src/core/deviation.ts';
+import {
+  ALL_CLEAR,
+  CRITERION_LABEL,
+  artikel,
+  blurWarning,
+  findings,
+  formatValue,
+  lesson,
+  mitArtikel,
+} from '../src/core/copy.ts';
 import { suggestOrder } from '../src/core/order.ts';
 
 const set = testSet();
@@ -63,11 +72,64 @@ describe('F-09 Nicht-reparierbares benennen', () => {
   });
 });
 
+describe('Bestimmter Artikel je Kriterium', () => {
+  // Alle acht einzeln, nicht stichprobenhaft: vier davon standen vor der
+  // Einführung des Genus-Felds falsch im Satz („die Weißabgleich"), und ein
+  // Fehler hier fällt nur beim Lesen auf, nie beim Rechnen.
+  const NOMINATIV: Record<string, string> = {
+    aspect: 'das Format',
+    exposure: 'die Belichtung',
+    warmth: 'der Weißabgleich',
+    tint: 'der Grün-Magenta-Stich',
+    contrast: 'der Kontrast',
+    saturation: 'die Sättigung',
+    sharpness: 'die Schärfe',
+    noise: 'das Rauschen',
+  };
+
+  const AKKUSATIV: Record<string, string> = {
+    aspect: 'das Format',
+    exposure: 'die Belichtung',
+    warmth: 'den Weißabgleich',
+    tint: 'den Grün-Magenta-Stich',
+    contrast: 'den Kontrast',
+    saturation: 'die Sättigung',
+    sharpness: 'die Schärfe',
+    noise: 'das Rauschen',
+  };
+
+  test('Nominativ, alle acht Kriterien', () => {
+    for (const c of CRITERIA) expect(mitArtikel(c)).toBe(NOMINATIV[c]);
+  });
+
+  test('Akkusativ, alle acht Kriterien', () => {
+    for (const c of CRITERIA) expect(mitArtikel(c, 'akk')).toBe(AKKUSATIV[c]);
+  });
+
+  test('Nominativ ist die Vorgabe, wenn kein Fall genannt wird', () => {
+    for (const c of CRITERIA) expect(mitArtikel(c)).toBe(mitArtikel(c, 'nom'));
+  });
+
+  test('der Artikel ist auch einzeln zu haben — Etappe 5 baut eigene Sätze', () => {
+    expect(artikel('contrast')).toBe('der');
+    expect(artikel('contrast', 'akk')).toBe('den');
+    for (const c of CRITERIA) {
+      expect(mitArtikel(c, 'akk')).toBe(`${artikel(c, 'akk')} ${CRITERION_LABEL[c]}`);
+    }
+  });
+
+  test('jedes Kriterium hat ein Genus — kein stilles undefined', () => {
+    for (const c of CRITERIA) expect(['der', 'die', 'das']).toContain(artikel(c));
+  });
+});
+
 describe('F-11 Lernzeile', () => {
   test('nennt ein Kriterium und einen umsetzbaren Hinweis', () => {
     const l = lesson(images.map((i) => i.deviations));
     expect(l.text.length).toBeGreaterThan(60);
     expect(l.text).toContain('streut');
+    // Der Artikel kommt aus dem Genus-Feld, nicht aus einem festen „die".
+    expect(l.text).toContain(mitArtikel(l.criterion));
   });
 });
 
