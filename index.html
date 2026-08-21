@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Misst mehrere Fotos eines Instagram-Posts gegeneinander und bringt sie auf einen gemeinsamen Nenner. Alles im Browser." />
+    <title>Lichttisch</title>
+  </head>
+  <body>
+    <header class="top">
+      <h1>Lichttisch</h1>
+      <p class="claim">Misst die Bilder eines Posts gegeneinander — und bringt sie auf einen gemeinsamen Nenner.</p>
+      <p class="privacy">Alles bleibt im Browser. Kein Upload, kein Konto, kein Server.</p>
+    </header>
+
+    <nav class="stages" aria-label="Stufen">
+      <button type="button" class="stage-tab" data-stage="1"><b>01</b> Bilder</button>
+      <button type="button" class="stage-tab" data-stage="2"><b>02</b> Befund</button>
+      <button type="button" class="stage-tab" data-stage="3"><b>03</b> Angleichen</button>
+      <button type="button" class="stage-tab" data-stage="4"><b>04</b> Reihe</button>
+    </nav>
+
+    <main>
+      <section id="stage-1" class="stage"></section>
+      <section id="stage-2" class="stage" hidden></section>
+      <section id="stage-3" class="stage" hidden></section>
+      <section id="stage-4" class="stage" hidden></section>
+    </main>
+
+    <div id="live" class="sr-only" role="status" aria-live="polite"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
