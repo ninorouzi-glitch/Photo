@@ -1,5 +1,6 @@
 import { expect, test, type ConsoleMessage } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
+import { CRITERIA } from '../src/core/deviation.ts';
 
 const fixture = (name: string) =>
   fileURLToPath(new URL(`../test/fixtures/out/${name}`, import.meta.url));
@@ -47,7 +48,10 @@ test('Durchlauf von der Ablage bis zum Export', async ({ page }) => {
 
   // ── Stufe 02 ──
   await expect(page.locator('table.matrix')).toBeVisible();
-  await expect(page.locator('table.matrix tbody tr')).toHaveCount(7);
+  // Gegen CRITERIA.length, nicht gegen eine feste Zahl: geprüft wird, dass die
+  // Matrix jedes Kriterium zeigt. Mit der festen 7 brach dieser Test, sobald
+  // tint als Achse dazukam — und er bräche bei der nächsten wieder.
+  await expect(page.locator('table.matrix tbody tr')).toHaveCount(CRITERIA.length);
   await expect(page.locator('table.matrix thead th')).toHaveCount(6); // Kriterienspalte + 5
   await expect(page.locator('.findings li').first()).toContainText('als das Set.');
 
