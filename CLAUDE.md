@@ -141,6 +141,25 @@ only — a ratio outside Instagram's band is cropped as asked, with a warning.
   a single column phase.
 - `PREVIEW_EDGE` (540) in `src/pipeline/render.ts`.
 
+## Rules for changes
+
+- **No linear light in `core/`.** There is no sRGB EOTF and no linear working
+  space; every measurement runs on gamma-encoded code values. That is a decision,
+  not a gap. No half-linearisation at individual sites — either throughout or not
+  at all, and throughout breaks every fixture and every threshold.
+- **German everywhere user-facing, and in every comment.** New functionality with
+  no counterpart in the spec does not get an invented requirement id; it gets an
+  explaining comment instead.
+- **Determinism is a requirement (F-21), not a convenience.** No `Math.random`, no
+  dependence on time or on the order things happen to arrive, anywhere in `core/`.
+- **The documented deviations are not repaired in silence.** Touching one means
+  saying so and moving the argument with it.
+- **150 ms per slider tick in stage 03 is a hard limit**, not a target.
+- **Quantify before repairing.** Before a site documented as weak gets "fixed",
+  measure how large the error actually is. Twice now an obviously unclean site
+  turned out to be balanced — see the interpolated inverse in `lut.ts` — and the
+  obvious correction would have made the result worse.
+
 ## Known, documented deviations — do not "fix" silently
 
 Four points where the code departs from the spec or falls short, each already
