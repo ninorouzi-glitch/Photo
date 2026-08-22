@@ -14,6 +14,10 @@ and requirement id (`F-01`, `A-03`, `P5`). Preserve those references when editin
 they are the only trace of the spec left in the tree. **Everything user-facing and
 every comment is in German**; match that.
 
+The roadmap for the ongoing extension lives in `PLAN.md`: what is already
+built, what comes next, and which decisions have already been made. Read it
+before proposing or writing anything.
+
 ## Commands
 
 ```bash
