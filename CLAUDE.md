@@ -14,6 +14,10 @@ and requirement id (`F-01`, `A-03`, `P5`). Preserve those references when editin
 they are the only trace of the spec left in the tree. **Everything user-facing and
 every comment is in German**; match that.
 
+`PLAN.md` holds the roadmap: what is being built in which order, and which
+decisions have already been made for it. This file stays the binding contract
+over architecture, tuning points and rules. Start any session by reading both.
+
 ## Commands
 
 ```bash
