@@ -2,8 +2,9 @@ import { describe, expect, test } from 'vitest';
 import type { Frame, Stats } from '../src/core/types.ts';
 import { analyzeFull } from '../src/core/stats.ts';
 import { computeTarget } from '../src/core/target.ts';
-import { MIN_SET, robustZ, typA, typB } from '../src/core/outlier.ts';
-import { addNoise, baseScene, farbraumBild, scaleChannels, stripes, testSet } from './fixtures/generate.ts';
+import { THRESHOLDS } from '../src/core/deviation.ts';
+import { MIN_SET, robustZ, typA } from '../src/core/outlier.ts';
+import { addNoise, baseScene, scaleChannels, testSet } from './fixtures/generate.ts';
 
 /**
  * Ausreißererkennung, Rechenkern (Etappe 5).
@@ -106,6 +107,21 @@ describe('Typ A — technische Ausreißer', () => {
     expect(typA(set)).toEqual(typA(set));
     expect(typA(set).map((a) => [a.index, a.criterion])).toEqual([[4, expect.anything()]]);
   });
+
+  test('ein Satz, der sich nur im Rauschen unterscheidet, meldet nichts auf noise', () => {
+    // Rauschen allein ist kein Ausreißer: σ 0…13 spreizt die `noise`-Achse
+    // zwar, aber der MAD eines so kleinen Sets ist winzig und der z-Score
+    // entsprechend groß. Was hier prüft, ist die UND-Bedingung — gemeldet
+    // werden darf auf dieser Achse nur, was auch die warn-Schwelle reißt.
+    const base = baseScene();
+    const set = [0, 4, 7, 10, 13].map((sigma, i) =>
+      analyzeFull(sigma === 0 ? base : addNoise(base, sigma, 7 + i)),
+    );
+    const unterSchwelle = typA(set)
+      .filter((a) => a.criterion === 'noise' && Math.abs(a.value) < THRESHOLDS.noise.warn)
+      .map((a) => `${a.index} d=${a.value.toFixed(3)}`);
+    expect(unterSchwelle).toEqual([]);
+  });
 });
 
 describe('robustZ', () => {
@@ -118,90 +134,5 @@ describe('robustZ', () => {
 
   test('alle Werte gleich: lauter Nullen', () => {
     expect(robustZ([3, 3, 3, 3]).z).toEqual([0, 0, 0, 0]);
-  });
-});
-
-/**
- * Typ B misst am **korrigierten** Bild: der Vertreter jeder belegten Zelle
- * geht durch dieselben Tabellen wie das Bild, danach wird neu einsortiert und
- * gegen das binweise Median-Histogramm des Sets gemessen. Ein eigener
- * Normalisierungsschritt für Belichtung und Weißabgleich entfällt deshalb —
- * die Korrektur selbst ist die Normalisierung.
- */
-describe('Typ B — farbliche Ausreißer', () => {
-  // Ohne `Settings`: Typ B misst immer bei voller Angleichung (siehe `typB`).
-  const B = (set: Stats[]) => typB(set, computeTarget(set));
-
-  test('ein homogenes Set meldet nichts', () => {
-    const set = homogenesSet();
-    expect(B(set).map((a) => `${a.index} z=${a.z.toFixed(1)} d=${a.value.toFixed(3)}`))
-      .toEqual([]);
-  });
-
-  test('§13-Bild 03 ist ein technischer Fall, kein farblicher', () => {
-    // Der Blaustich ist wegzukorrigieren, also darf Typ B ihn nicht melden.
-    // Bei der eingestellten Stärke 0,7 täte er es (Abstand 0,607), bei voller
-    // Angleichung nicht mehr (0,202) — genau deshalb misst `typB` bei 1,0.
-    const set = testSet().map((x) => analyzeFull(x.frame));
-    expect(B(set).map((a) => a.index)).not.toContain(2);
-    expect(typA(set).map((a) => a.index)).toContain(2);
-  });
-
-  test('ein Set, das sich nur im Rauschen unterscheidet, meldet keinen Typ B', () => {
-    // Rauschen streut die Werte über Zellgrenzen und verbreitert damit die
-    // Farbverteilung, ohne dass eine einzige Farbe hinzukäme. Am §13-Satz
-    // gemessen trägt es 0,134 zum Abstand bei und bleibt damit unter
-    // MIN_FARBABSTAND; hier steht der Fall als Test.
-    const base = baseScene();
-    const set = [0, 4, 7, 10, 13].map((sigma, i) =>
-      analyzeFull(sigma === 0 ? base : addNoise(base, sigma, 7 + i)),
-    );
-    expect(B(set).map((a) => `${a.index} d=${a.value.toFixed(3)}`)).toEqual([]);
-  });
-
-  test('ein Bild aus einer anderen Farbwelt wird gemeldet', () => {
-    // `stripes()` stammt aus `measurementSet()` und ist hier genau richtig: ein
-    // hartes Rot-Blau-Muster ist kein Bild desselben Posts — das ist der Fall,
-    // den Typ B erkennen soll. (In die Zielwertbildung einer Abnahme gehört es
-    // weiterhin nicht, siehe `measurementSet()`.)
-    const set = [...homogenesSet().slice(0, 4), analyzeFull(stripes())];
-    const gefunden = B(set);
-
-    expect(gefunden).toHaveLength(1);
-    expect(gefunden[0]!.index).toBe(4);
-    expect(gefunden[0]!.typ).toBe('B');
-    expect(gefunden[0]!.criterion).toBeNull();
-  });
-
-  test('der Klartext rät zum Tauschen und nennt keine Zahl', () => {
-    const set = [...homogenesSet().slice(0, 4), analyzeFull(stripes())];
-    const text = B(set)[0]!.text;
-
-    expect(text).toMatch(/^Bild 5 passt farblich nicht/);
-    expect(text).toMatch(/tauschen/);
-    expect(text).not.toMatch(/\d[,.]\d/);
-  });
-
-  test('unter vier Bildern wird Typ B nicht ausgewertet', () => {
-    const set = [...homogenesSet().slice(0, 2), analyzeFull(stripes())];
-    expect(set).toHaveLength(MIN_SET - 1);
-    expect(B(set)).toEqual([]);
-  });
-
-  test('20 Bilder mit breit belegtem Gitter bleiben weit unter 30 ms', () => {
-    // Der Preis hängt an der Zahl der belegten Zellen; `farbraumBild()` belegt
-    // 2744 der 4096 und ist damit die teure Seite (§13 belegt 26…164).
-    const eines = analyzeFull(farbraumBild());
-    const set = Array.from({ length: 20 }, () => eines);
-    B(set);
-
-    const zeiten: number[] = [];
-    for (let i = 0; i < 5; i++) {
-      const t0 = performance.now();
-      B(set);
-      zeiten.push(performance.now() - t0);
-    }
-    zeiten.sort((a, b) => a - b);
-    expect(zeiten[2]!).toBeLessThan(30);
   });
 });

@@ -285,6 +285,10 @@ argument with it.
   never reach target computation**: a clipped band and a vignette are not photographs
   from the same post, and in the set they drag the median and the initial spread far
   enough that A-02's convergence bounds measure something other than convergence.
+  **`testSet()` holds colour images only, so it does not cover the monochrome
+  case** — a black-and-white image has `warmth = tint = 0` by construction and a
+  zero denominator on the `saturation` axis (see `MESSUNG-ausreisser.md`, and
+  stage 9 in `PLAN.md`).
 - `test/acceptance.test.ts` — A-01…A-04 against `testSet()`. It calls
   `buildRecipe` without a `SatModel`, i.e. it measures the core path, not the
   path the app takes since 3c.

@@ -16,10 +16,8 @@
    - **Typ A, technischer Ausreißer** — weicht auf einer gemessenen Achse so
      stark ab, dass die Angleichung ihn zwar korrigiert, aber mit sichtbaren
      Kosten. Konsequenz: „prüf das Ergebnis genau".
-   - **Typ B, farblicher Ausreißer** — technisch einwandfrei, sieht nach der
-     Angleichung sauber aus, passt aber farblich nicht (ein Innenraumbild
-     zwischen neun Strandbildern). Nicht wegkorrigierbar. Konsequenz:
-     „überleg dir, das Bild zu tauschen".
+   - **Typ B, farblicher Ausreißer** — an echtem Material widerlegt und
+     gestrichen, siehe `MESSUNG-ausreisser.md` und Etappe 5.
 
    Erkannte Ausreißer werden markiert. Pro Bild gibt es einen Schalter „Nicht in
    die Zielwerte einrechnen": das Bild fließt nicht in die Zielwertbildung ein,
@@ -49,6 +47,34 @@ Stand: `tsc` sauber, 142 Unit-Tests grün, `vite build` läuft.
 
 ## Offen
 
+### Etappe 9 — Monochrome Bilder (zuerst)
+
+Der §13-Satz besteht ausschließlich aus farbigen Bildern, deshalb ist der Fall
+nie aufgefallen. An echtem Material beschädigt die Angleichung schwarzweiße
+Bilder in beide Richtungen (`MESSUNG-ausreisser.md`, Befund 3):
+
+- Ein Schwarzweißbild hat per Konstruktion r = g = b, also `warmth = tint = 0`.
+  Die Kanalfaktoren legen ihm einen Farbstich auf, den es nie hatte, und der
+  Sättigungsfaktor verstärkt den frisch entstandenen Stich anschließend
+  (gemessen: 0,000 → 0,020 bei Faktor 1,557, Stärke 0,7).
+- Umgekehrt entsättigt ein Schwarzweißsatz das eine Farbbild darin um 31 %
+  (0,389 → 0,269, Stärke 0,7); bei Stärke 1,0 zieht es weiter Richtung Grau.
+- Dazu ein numerischer Fehler: die `saturation`-Achse geht als log2-Verhältnis
+  in `deviation.ts` ein, und bei einem Schwarzweißbild ist der Nenner 0. Der
+  rein schwarzweiße Satz misst so einen `saturation`-MAD von 0,415, während
+  seine Bilder tatsächlich bei 0,030, 0,023 und 0,000 liegen. Die Befundmatrix
+  meldet dort heute Unsinn, und die Ausreißererkennung erbt den Fehler.
+
+Vorgehen: Bilder unter einer kleinen Sättigungsschwelle gelten als **monochrom**.
+Für sie entfallen Weißabgleich und Sättigungsfaktor; Belichtung und Tonwertkurve
+laufen normal weiter, denn die binden sie an den Satz. Auf `warmth`, `tint` und
+`saturation` gehen sie nicht in die Zielwertbildung ein, sonst ziehen sie den
+Median. Die Schwelle legt das Material nahe: schwarzweiße Bilder messen 0,000 bis
+0,030, farbige ab 0,32 — dazwischen liegt eine Größenordnung Luft.
+
+Tests: ein rein schwarzweißer Satz bleibt nach der Angleichung neutral, ein
+Farbbild in einem solchen Satz bleibt farbig.
+
 ### Schritt 0 — zwei Lücken aus 3c schließen (klein, vor Etappe 5)
 
 - **A-01…A-04 laufen am Produktivpfad vorbei.** `test/acceptance.test.ts` ruft
@@ -76,11 +102,12 @@ Ausreißer bei `|z| > 3,5`. Vier Fallstricke, alle zwingend:
   Deshalb zusätzlich als **UND**-Bedingung die warn-Schwelle aus `THRESHOLDS`.
 - Unter 4 Bildern wird Typ A nicht ausgewertet.
 
-**Typ B** über das Farbgitter aus 3c: Bin-Vertreter durch dieselbe Operation
-schicken, die `apply.ts` ausführt (`sample(curve, i·g[c])`), Histogramm über die
-korrigierten Vertreter, Distanz zum binweisen Median-Histogramm des Sets, darauf
-wieder der MAD-z-Score. Kein separater Normalisierungsschritt für Belichtung und
-Weißabgleich — die Korrektur selbst ist die Normalisierung.
+**Typ B ist gestrichen.** Der farbliche Ausreißer wurde an echtem Material
+widerlegt: acht Sätze, 50 Bilder, null Treffer, und im Eindringlingstest fand er
+eins von acht Fremdbildern, wo Typ A acht von acht fand. Ein globales
+Farbhistogramm misst den Bildinhalt, nicht die Farbwelt. Die Messung samt Zahlen
+steht in `MESSUNG-ausreisser.md`; das Farbgitter aus 3c bleibt und trägt weiter
+die Sättigungsschätzung.
 
 Rückgabe pro Bild: Typ, Achse, z-Score, absolute Abweichung, fertig formulierter
 deutscher Klartext. **Keine EV-Werte nennen** — die `exposure`-Achse misst log2
@@ -89,6 +116,17 @@ Qualitativ formulieren: „deutlich dunkler als das Set", „spürbar wärmer al
 übrigen Bilder". Für die Grammatik den Artikel-Helfer aus Etappe 2A.
 
 Wichtigster Test: ein sauberes homogenes Set meldet **nichts**.
+
+### Etappe 4 — Clipping-Guard (bewusst nach 5, jetzt vor 6)
+
+Zwei Mechanismen, beide ohne Pixel-Durchlauf abschätzbar. Erstens: die
+Kanalfaktoren schieben Werte über den Rand, bevor die Kurve gefragt wird
+(`sample(curve, i·g[c])`) — abschätzbar als `1 − CDF_c(255/g)` aus den
+kanalweisen CDFs. Die Matching-Kurve selbst kann per Konstruktion nicht clippen.
+Zweitens: eine Ziel-CDF mit viel Masse am Rand bildet einen ganzen
+Eingangsbereich auf 0 ab. Gegenmittel unterschiedlich: bei Mechanismus 1 die
+Gains dämpfen, bei Mechanismus 2 die Kurvenstärke. `MAX_SAT_FACTOR` aus Etappe 3
+gehört hier hineingeführt.
 
 ### Etappe 6 — Ausreißer im UI, mit Ausschlussschalter
 
@@ -99,16 +137,9 @@ sonst wird der Schalter deaktiviert — mit sichtbarer Begründung, nicht still.
 Beachten: nimmt man den stärksten Ausreißer heraus, kann ein anderes Bild zum
 Ausreißer werden. Statistisch korrekt, kann aber unruhig wirken.
 
-### Etappe 4 — Clipping-Guard (bewusst nach 5 und 6)
-
-Zwei Mechanismen, beide ohne Pixel-Durchlauf abschätzbar. Erstens: die
-Kanalfaktoren schieben Werte über den Rand, bevor die Kurve gefragt wird
-(`sample(curve, i·g[c])`) — abschätzbar als `1 − CDF_c(255/g)` aus den
-kanalweisen CDFs. Die Matching-Kurve selbst kann per Konstruktion nicht clippen.
-Zweitens: eine Ziel-CDF mit viel Masse am Rand bildet einen ganzen
-Eingangsbereich auf 0 ab. Gegenmittel unterschiedlich: bei Mechanismus 1 die
-Gains dämpfen, bei Mechanismus 2 die Kurvenstärke. `MAX_SAT_FACTOR` aus Etappe 3
-gehört hier hineingeführt.
+Pro Bild wird nur der **stärkste** Befund gemeldet, nicht jedes gerissene
+Kriterium. Im gemessenen Material meldet Typ A bis zu 4 von 7 Bildern eines
+Satzes; ein Hinweis, der die Mehrheit trifft, trägt keine Information mehr.
 
 ### Etappe 7 — Hauttonmaske (optional)
 
@@ -139,3 +170,16 @@ des Originals — die Matching-Kurve verteilt die Tonwerte um.
   Abbruchbedingungen kommen zurück. Berichtslänge vorgeben.
 - **Vor jeder Etappe committen.** Dann ist `git diff` immer exakt der Umfang der
   laufenden Etappe.
+
+## Verworfen, mit Begründung
+
+- **Satzkohäsion — ob Bilder zusammengehören.** An acht Sätzen und 50 Bildern
+  gemessen: kein trennendes Maß. Jeder „passt nicht"-Wert liegt innerhalb der
+  Spanne der stimmigen Sätze, auf `exposure`, `saturation`, `warmth`, `tint`,
+  `contrast`, `p01` und auf dem Farbabstand gleichermaßen. Das Urteil ist
+  redaktionell — ein Ort, ein Tag, eine Erzählung — und darüber weiß eine
+  Messung globaler Kennwerte nichts. Zahlen in `MESSUNG-ausreisser.md`,
+  Befund 2. Das Werkzeug beantwortet nicht, ob Bilder zusammengehören, sondern
+  wie viel Arbeit die Angleichung leistet und wo sie sichtbar etwas kostet.
+- **Typ B, der farbliche Ausreißer.** Siehe Etappe 5 und
+  `MESSUNG-ausreisser.md`, Befund 1.

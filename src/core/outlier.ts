@@ -1,21 +1,20 @@
-import type { ColorGrid, Criterion, Settings, Stats } from './types.ts';
-import { DEFAULT_SETTINGS, MIN_CONTRAST } from './types.ts';
-import { GRID_BINS, GRID_SHIFT } from './satgrid.ts';
-import { buildLuts, type Luts } from './lut.ts';
+import type { Criterion, Stats } from './types.ts';
+import { MIN_CONTRAST } from './types.ts';
 import { CRITERIA, THRESHOLDS } from './deviation.ts';
 import { DIRECTION, mitArtikel } from './copy.ts';
 
 /**
  * Ausreißererkennung, Rechenkern (Etappe 5).
  *
- * Zwei Sorten, die nichts miteinander zu tun haben:
+ * **Typ A, technischer Ausreißer:** weicht auf einer der gemessenen Achsen so
+ * weit ab, dass die Angleichung ihn zwar erreicht, aber mit sichtbaren Kosten.
+ * Konsequenz für den Benutzer: das Ergebnis genau ansehen.
  *
- * - **Typ A, technischer Ausreißer.** Weicht auf einer der gemessenen Achsen
- *   so weit ab, dass die Angleichung ihn zwar erreicht, aber mit sichtbaren
- *   Kosten. Konsequenz für den Benutzer: das Ergebnis genau ansehen.
- * - **Typ B, farblicher Ausreißer.** Technisch einwandfrei; nach der
- *   Angleichung sauber, passt aber farblich nicht zum Set. Nicht
- *   wegzukorrigieren — die Konsequenz ist, das Bild zu tauschen.
+ * Einen **Typ B** (farblicher Ausreißer) gibt es nicht: an acht Sätzen und 50
+ * Bildern gemessen fand er null Ausreißer und im Eindringlingstest eins von
+ * acht Fremdbildern, wo Typ A acht von acht fand. Ein globales Farbhistogramm
+ * misst den Bildinhalt, nicht die Farbwelt. Zahlen und Herleitung in
+ * `MESSUNG-ausreisser.md`, Befund 1; das Farbgitter selbst bleibt (Etappe 3c).
  *
  * Hier steht nur die Rechnung. Markierung, Klartext im UI und der Schalter
  * „nicht in die Zielwerte einrechnen" sind Etappe 6.
@@ -49,8 +48,15 @@ const MAD_ERSATZ_KONSTANTE = 1.2533;
 
 export type Ausreisser = {
   index: number; // Position im übergebenen Array
-  typ: 'A' | 'B';
-  criterion: Criterion | null; // Typ B hat keine einzelne Achse
+  /**
+   * Sorte des Befundes. Steht heute immer auf 'A' und bleibt trotzdem im Typ:
+   * das PRD unterscheidet Sorten von Ausreißern, und die zweite füllt Etappe 4
+   * mit dem Clipping-Guard — ein Bild, dessen Angleichung sichtbar etwas
+   * kostet, ist ein anderer Befund als eines, das aus der Reihe fällt.
+   */
+  typ: 'A';
+  /** Die Achse des Befundes. Nullbar für Sorten ohne einzelne Achse (Etappe 4). */
+  criterion: Criterion | null;
   z: number; // vorzeichenbehaftet
   value: number; // Abweichung vom frischen Median, Einheit der Achse
   text: string; // fertig formulierter deutscher Klartext
@@ -169,183 +175,4 @@ export function typA(stats: Stats[]): Ausreisser[] {
   }
 
   return [...befund.values()].sort((a, b) => Math.abs(b.z) - Math.abs(a.z));
-}
-
-// ── Typ B: farbliche Ausreißer ────────────────────────────────────────────
-
-/**
- * Mindestabstand der Farbverteilung, unter dem nichts gemeldet wird.
- *
- * Dieselbe Rolle wie die Warnschwelle bei Typ A und aus demselben Grund
- * nötig: der z-Score misst nur, wie weit ein Bild gegenüber der Streuung des
- * Sets heraussteht, nicht ob der Unterschied überhaupt zu sehen ist. In einem
- * Set aus fünf Aufnahmen derselben Szene liegen die Abstände bei wenigen
- * Prozent, und eines davon ist immer das größte.
- *
- * Der Wert ist ein totaler Variationsabstand: 0 heißt deckungsgleiche
- * Verteilung, 1 heißt kein einziger gemeinsamer Farbbereich. Gemessen an den
- * Fixtures (Stärke 0,7 / 1,0): fünf Aufnahmen derselben Szene liegen bei
- * 0,009…0,072 bzw. 0,010…0,102 — das ist der Sockel aus der Einsortierung an
- * den Bin-Grenzen, nicht Farbe. Ein Bild aus einer anderen Farbwelt liegt
- * weit darüber: Streifenmuster 1,000, Farbtafel 0,86/0,86, stark entsättigt
- * 0,32/0,32. Dazwischen ist viel Luft, und 0,25 liegt bewusst näher am ruhigen
- * Ende: Typ B korrigiert nicht, sondern rät zum Tauschen — ein Fehlalarm
- * kostet hier mehr als ein übersehener Fall.
- *
- * Weicheres Einsortieren (trilinear auf die Bin-Zentren) wurde gemessen und
- * verworfen: es hebt den Sockel des homogenen Sets auf 0,022…0,128, statt ihn
- * zu senken, und drückt zugleich die echten Abstände. Der Sockel steckt nicht
- * in den Bin-Grenzen, sondern in den Zellen, die überhaupt belegt sind.
- *
- * Kein Tuning-Punkt aus THRESHOLDS: das ist eine andere Größe auf einer
- * anderen Skala und gehört nicht in die Befundmatrix.
- */
-export const MIN_FARBABSTAND = 0.25;
-
-/** Tabellenwert an einer Zwischenstelle — der Vertreter ist ein Mittelwert. */
-function tab(lut: Float32Array, x: number): number {
-  const i = Math.floor(x);
-  if (i >= 255) return lut[255]!;
-  if (i < 0) return lut[0]!;
-  const f = x - i;
-  return lut[i]! * (1 - f) + lut[i + 1]! * f;
-}
-
-/**
- * Die Farbverteilung des **korrigierten** Bildes, als Anteile über 16³ Zellen.
- *
- * Aus dem Farbgitter von Etappe 3c, nicht aus einem neuen Pixeldurchlauf: der
- * Vertreter jeder belegten Zelle geht durch dieselben Tabellen wie das Bild
- * (`sample(curve, i·g[c])`, in `buildLuts` bereits gefaltet) und wird danach
- * neu einsortiert.
- *
- * Ein eigener Normalisierungsschritt für Belichtung und Weißabgleich wäre
- * doppelt gemoppelt — die Korrektur selbst *ist* die Normalisierung. Genau
- * darin liegt die Trennung zu Typ A: was die Tabellen einfangen, ist hier
- * schon eingefangen, und was übrig bleibt, bleibt auch im Export übrig.
- */
-function farbVerteilung(grid: ColorGrid, luts: Luts): Float64Array {
-  const h = new Float64Array(GRID_BINS ** 3);
-  const { counts, sums } = grid;
-  let n = 0;
-
-  for (let k = 0; k < counts.length; k++) {
-    const c = counts[k]!;
-    if (c === 0) continue;
-    n += c;
-    const r = tab(luts[0]!, sums[k * 3]! / c);
-    const g = tab(luts[1]!, sums[k * 3 + 1]! / c);
-    const b = tab(luts[2]!, sums[k * 3 + 2]! / c);
-    const kr = Math.min(GRID_BINS - 1, Math.max(0, Math.floor(r) >> GRID_SHIFT));
-    const kg = Math.min(GRID_BINS - 1, Math.max(0, Math.floor(g) >> GRID_SHIFT));
-    const kb = Math.min(GRID_BINS - 1, Math.max(0, Math.floor(b) >> GRID_SHIFT));
-    h[(kr << 8) | (kg << 4) | kb] += c;
-  }
-
-  if (n > 0) for (let i = 0; i < h.length; i++) h[i]! /= n;
-  return h;
-}
-
-/**
- * Totaler Variationsabstand zweier Anteilsverteilungen, 0…1.
- *
- * Der halbe L1-Abstand, damit der Wert eine Bedeutung hat: er ist der Anteil
- * der Pixel, der in der einen Verteilung in Farbbereichen liegt, in denen die
- * andere nichts hat.
- */
-function abstand(a: Float64Array, b: Float64Array): number {
-  let s = 0;
-  for (let i = 0; i < a.length; i++) s += Math.abs(a[i]! - b[i]!);
-  return s / 2;
-}
-
-/**
- * Die Einstellung, unter der Typ B misst: volle Stärke, Weißabgleich und
- * Tonwertkurve an. Sättigung, Korn und Schärfe stehen hier nur der
- * Vollständigkeit halber — `buildLuts` liest sie nicht.
- */
-const VOLLE_ANGLEICHUNG: Settings = {
-  ...DEFAULT_SETTINGS,
-  strength: 1,
-  fixes: { ...DEFAULT_SETTINGS.fixes, tone: true, wb: true },
-};
-
-function textB(index: number): string {
-  return (
-    `Bild ${index + 1} passt farblich nicht zu den übrigen Bildern. Belichtung und ` +
-    `Weißabgleich sind angeglichen — die Farben bleiben trotzdem andere, und daran ` +
-    `ändert auch mehr Korrektur nichts. Überleg dir, das Bild zu tauschen.`
-  );
-}
-
-/**
- * Typ B: farbliche Ausreißer über das Farbgitter.
- *
- * Der Weg: jedes Bild durch seine eigenen Tabellen schicken (also so, wie es
- * im Export aussieht), daraus eine Farbverteilung, davon binweise den Median
- * des Sets, und der Abstand jedes Bildes zu diesem Median ist die Größe, auf
- * die wieder der modifizierte z-Score geht.
- *
- * Der binweise Median ist selbst keine Verteilung — er summiert sich nicht auf
- * 1 —, also wird er normiert. Ohne das trüge jeder Abstand denselben Sockel,
- * und der z-Score misst zwar noch dasselbe, `MIN_FARBABSTAND` aber nicht mehr.
- *
- * Wie bei Typ A gilt die UND-Bedingung mit `MIN_FARBABSTAND`, und einseitig:
- * ein Bild, das der Farbwelt des Sets *näher* liegt als alle anderen, ist kein
- * Ausreißer.
- *
- * **Gemessen wird bei voller Stärke, nicht bei der eingestellten.** Typ B
- * beantwortet eine einzige Frage: bleibt dieses Bild farblich fremd, *auch
- * wenn* die Angleichung alles tut, was sie kann? Läuft die Rechnung mit einer
- * zurückgedrehten Stärke, misst der Abstand den Rest einer Korrektur, die der
- * Benutzer selbst weggeregelt hat — und meldet damit als „nicht
- * wegzukorrigieren", was mit einem Schieberegler zu beheben wäre. Am §13-Satz
- * ist das kein Randfall: Bild 03 (B × 1,35) kommt bei Stärke 0,7 als Typ B
- * durch und bei 1,0 nicht mehr. Deshalb steht `Settings` auch nicht in der
- * Signatur — es gäbe nichts daran einzustellen.
- *
- * Was das Maß nicht trennen kann, ist Farbe von **Bildausschnitt**: die
- * Verteilung zählt, welche Farbbereiche wie oft vorkommen, und ein anderer
- * Ausschnitt derselben Szene zeigt andere Anteile davon. Am §13-Satz gemessen,
- * je gegen den Median der übrigen vier Bilder und bei voller Stärke: allein der
- * Ausschnitt von Bild 05 kommt auf 0,731, allein die Weichzeichnung auf 0,110,
- * allein das Rauschen auf 0,134 — die Grundszene selbst liegt bei 0,102. Bild
- * 05 wird also gemeldet, und zwar wegen seines Ausschnitts. Für ein Carousel
- * ist das nicht einmal falsch (ein Bild, das einen ganz anderen Teil der Szene
- * zeigt, fällt auf), aber es ist nicht das, was Typ B verspricht. Der Fall ist
- * beziffert und offen, nicht stillschweigend repariert.
- */
-export function typB(stats: Stats[], target: Stats): Ausreisser[] {
-  if (stats.length < MIN_SET) return [];
-
-  const verteilungen = stats.map((s) =>
-    farbVerteilung(s.colorGrid, buildLuts(s, target, VOLLE_ANGLEICHUNG)),
-  );
-
-  const mitte = new Float64Array(GRID_BINS ** 3);
-  let summe = 0;
-  for (let i = 0; i < mitte.length; i++) {
-    const m = medianOf(verteilungen.map((v) => v[i]!));
-    mitte[i] = m;
-    summe += m;
-  }
-  if (summe > 0) for (let i = 0; i < mitte.length; i++) mitte[i]! /= summe;
-
-  const abstaende = verteilungen.map((v) => abstand(v, mitte));
-  const { z, median } = robustZ(abstaende);
-
-  const out: Ausreisser[] = [];
-  for (let i = 0; i < stats.length; i++) {
-    if (z[i]! <= Z_GRENZE) continue;
-    if (abstaende[i]! < MIN_FARBABSTAND) continue;
-    out.push({
-      index: i,
-      typ: 'B',
-      criterion: null,
-      z: z[i]!,
-      value: abstaende[i]! - median,
-      text: textB(i),
-    });
-  }
-  return out.sort((a, b) => b.z - a.z);
 }
