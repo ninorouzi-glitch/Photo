@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { baseScene, blur, crop, testSet } from './fixtures/generate.ts';
 import { analyzeFull } from '../src/core/stats.ts';
-import { computeTarget } from '../src/core/target.ts';
+import { computeTarget, satModels } from '../src/core/target.ts';
 import { deviationValues, deviations } from '../src/core/deviation.ts';
 import { applyRecipe, buildRecipe } from '../src/core/apply.ts';
 import { cropFrame, cropRect } from '../src/core/crop.ts';
-import { DEFAULT_SETTINGS, RATIOS, type Settings } from '../src/core/types.ts';
+import { DEFAULT_SETTINGS, RATIOS, type SatModel, type Settings } from '../src/core/types.ts';
 import { cloneFrame } from '../src/core/frame.ts';
 
 const set = testSet();
@@ -25,6 +25,31 @@ function firstDiff(a: Uint8ClampedArray, b: Uint8ClampedArray): number {
 function settings(over: Partial<Settings> = {}): Settings {
   return { ...DEFAULT_SETTINGS, ...over, fixes: { ...DEFAULT_SETTINGS.fixes, ...over.fixes } };
 }
+
+/** Ein Zielwertsatz für alle Abnahmen, damit beide Pfade nachweislich gegen
+ *  dasselbe Ziel rechnen. */
+const zielwerte = computeTarget(stats);
+
+/**
+ * Die beiden Wege, auf denen ein Rezept entsteht.
+ *
+ * `buildRecipe` nimmt seit Etappe 3c ein optionales `SatModel`. Der Kernpfad
+ * lässt es weg — so rechnen alle Tests, die ein Rezept von Hand bauen. Die App
+ * lässt es nicht weg: `derive()` in store.ts ruft `satModels()` über das ganze
+ * Set und reicht das Ergebnis bis in `render.ts` durch. A-02…A-04 liefen damit
+ * an dem Pfad vorbei, den tatsächlich jemand nimmt.
+ *
+ * Beide werden geprüft, der bisherige bleibt stehen. Die Modelle hängen an den
+ * Tabellen und damit an der Stärke, deshalb kommt `Settings` herein statt eines
+ * fertigen Arrays. `anchorIndex = -1` ist Medianwahl, wie in `DEFAULT_SETTINGS`.
+ */
+const PFADE: { name: string; modelle: (cfg: Settings) => SatModel[] | null }[] = [
+  { name: 'ohne SatModel (Kernpfad)', modelle: () => null },
+  {
+    name: 'mit SatModel (Produktivpfad seit 3c)',
+    modelle: (cfg) => satModels(stats, zielwerte, cfg, -1),
+  },
+];
 
 describe('A-01 Messgenauigkeit (§13)', () => {
   const ref = byId('01');
@@ -78,13 +103,13 @@ describe('A-01 Messgenauigkeit (§13)', () => {
   });
 });
 
-describe('A-02 Konvergenz', () => {
+describe.each(PFADE)('A-02 Konvergenz — $name', (pfad) => {
   const s = 0.7;
   const cfg = settings({ strength: s });
-  const target = computeTarget(stats);
+  const modelle = pfad.modelle(cfg);
 
   const corrected = set.map((t, i) => {
-    const recipe = buildRecipe(stats[i]!, target, cfg);
+    const recipe = buildRecipe(stats[i]!, zielwerte, cfg, modelle?.[i]);
     return analyzeFull(applyRecipe(cloneFrame(t.frame), recipe, i + 1));
   });
 
@@ -130,15 +155,15 @@ describe('A-02 Konvergenz', () => {
   });
 });
 
-describe('A-03 Nulldurchlauf', () => {
+describe.each(PFADE)('A-03 Nulldurchlauf — $name', (pfad) => {
   test('Stärke 0 % ist pixelgleich zum zugeschnittenen Original', () => {
-    const target = computeTarget(stats);
     const cfg = settings({ strength: 0 });
+    const modelle = pfad.modelle(cfg);
     for (let i = 0; i < set.length; i++) {
       const src = set[i]!.frame;
       const rect = cropRect(src.width, src.height, RATIOS['4:5']);
       const cropped = cropFrame(src, rect);
-      const recipe = buildRecipe(stats[i]!, target, cfg);
+      const recipe = buildRecipe(stats[i]!, zielwerte, cfg, modelle?.[i]);
       expect(recipe.neutral).toBe(true);
       const out = applyRecipe(cloneFrame(cropped), recipe, i + 1);
       expect(firstDiff(out.data, cropped.data)).toBe(-1);
@@ -146,17 +171,17 @@ describe('A-03 Nulldurchlauf', () => {
   });
 
   test('Alle Schalter aus ergibt dasselbe wie Stärke 0 % (F-15)', () => {
-    const target = computeTarget(stats);
     const cfg = settings({
       strength: 1,
       fixes: { tone: false, wb: false, saturation: false, grain: false, sharpen: false },
     });
-    const recipe = buildRecipe(stats[0]!, target, cfg);
+    const modelle = pfad.modelle(cfg);
+    const recipe = buildRecipe(stats[0]!, zielwerte, cfg, modelle?.[0]);
     expect(recipe.neutral).toBe(true);
   });
 });
 
-describe('A-04 keine Verschlechterung', () => {
+describe.each(PFADE)('A-04 keine Verschlechterung — $name', (pfad) => {
   const clipped = (f: { data: Uint8ClampedArray }) => {
     let n = 0;
     for (let p = 0; p < f.data.length; p += 4) {
@@ -167,11 +192,11 @@ describe('A-04 keine Verschlechterung', () => {
   };
 
   test('Anteil ausgefressener Pixel steigt um höchstens 0,5 Prozentpunkte', () => {
-    const target = computeTarget(stats);
     const cfg = settings({ strength: 1 });
+    const modelle = pfad.modelle(cfg);
     for (let i = 0; i < set.length; i++) {
       const before = clipped(set[i]!.frame);
-      const recipe = buildRecipe(stats[i]!, target, cfg);
+      const recipe = buildRecipe(stats[i]!, zielwerte, cfg, modelle?.[i]);
       const after = clipped(applyRecipe(cloneFrame(set[i]!.frame), recipe, i + 1));
       expect(after - before).toBeLessThanOrEqual(0.5);
     }

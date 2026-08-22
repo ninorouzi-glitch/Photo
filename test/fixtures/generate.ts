@@ -325,3 +325,68 @@ export function measurementSet(): { id: string; label: string; frame: Frame }[] 
     { id: '10', label: 'nur Sättigung, flau', frame: chromaScaled(base, 0.6) },
   ];
 }
+
+/**
+ * Ein Bild mit breit belegtem Farbgitter — kein Spec-Bezug, reines Messmittel.
+ *
+ * Die §13-Bilder belegen nur 26…164 der 4096 Zellen: eine Graustufenszene mit
+ * vier Farbflächen. Was `satModels()` kostet, hängt aber an der Zahl der
+ * belegten Zellen, denn je Zelle laufen 4³ Stützstellen durch die Tabellen
+ * (`unsicherAnteil` in satgrid.ts). Am §13-Satz gemessen wäre der Preis also
+ * systematisch zu niedrig. Dieses Bild legt die andere Seite fest.
+ *
+ * Aufbau: 14³ = 2744 Farben auf dem Gitterraster, jede als 8×8-Block, das
+ * ganze Feld zentriert im Bild. Drei Größen sind aufeinander abgestimmt und
+ * dürfen nicht einzeln geändert werden:
+ *
+ * - **512×640** ist genau `MEASURE_EDGE`, also wird nicht skaliert. Ein
+ *   Downscale mittelte über Blockgrenzen und erzeugte Mischfarben, die im
+ *   Gitter als zusätzliche Zellen erschienen — die Belegung wäre dann nicht
+ *   mehr gesetzt, sondern zufällig.
+ * - **Das 448×448-Feld** liegt vollständig im Messfenster (`MEASURE_INSET`,
+ *   x 27…484, y 34…605), sonst zählte `MEASURE_AREA` einen Teil der Farben
+ *   gar nicht mit.
+ * - **Bins 1…14** statt 0…15: der Vertreterwert `bin·16 + 8` liegt damit in
+ *   24…232 und jeder Kanal bleibt zwischen `CLIP_LOW` und `CLIP_HIGH`, so
+ *   dass `channelsUsable` keinen einzigen Block verwirft.
+ *
+ * NICHT in `testSet()` aufnehmen — ein Farbtafelbild ist kein Foto desselben
+ * Posts und verschöbe jeden Median (siehe `measurementSet()`).
+ */
+export function farbraumBild(): Frame {
+  const width = 512;
+  const height = 640;
+  const BINS = 14; // Bins 1…14, die Ränder bleiben frei
+  const BLOCK = 8;
+  const SIDE = 56; // 56² = 3136 Blöcke für 2744 Farben
+  const f = createFrame(width, height);
+  const d = f.data;
+
+  const feld = SIDE * BLOCK; // 448
+  const ox = (width - feld) / 2;
+  const oy = (height - feld) / 2;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let r = 128, g = 128, b = 128; // Rahmen: mittleres Grau, Zelle (8,8,8)
+
+      const bx = Math.floor((x - ox) / BLOCK);
+      const by = Math.floor((y - oy) / BLOCK);
+      if (bx >= 0 && bx < SIDE && by >= 0 && by < SIDE) {
+        // Blöcke reihenweise durchnummeriert, die Farbe zyklisch dazu: so ist
+        // jede der 2744 Farben mindestens einmal vertreten und das Feld voll.
+        const i = (by * SIDE + bx) % (BINS ** 3);
+        r = (1 + Math.floor(i / (BINS * BINS))) * 16 + 8;
+        g = (1 + (Math.floor(i / BINS) % BINS)) * 16 + 8;
+        b = (1 + (i % BINS)) * 16 + 8;
+      }
+
+      const p = (y * width + x) * 4;
+      d[p] = r;
+      d[p + 1] = g;
+      d[p + 2] = b;
+      d[p + 3] = 255;
+    }
+  }
+  return f;
+}
