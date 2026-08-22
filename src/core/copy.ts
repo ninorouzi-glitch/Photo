@@ -62,8 +62,14 @@ export function mitArtikel(c: Criterion, kasus: Kasus = 'nom'): string {
   return `${artikel(c, kasus)} ${CRITERION_LABEL[c]}`;
 }
 
-/** Richtungswörter: [Wert > 0, Wert < 0]. */
-const DIRECTION: Record<Criterion, [string, string]> = {
+/**
+ * Richtungswörter: [Wert > 0, Wert < 0].
+ *
+ * Exportiert, weil `outlier.ts` denselben Wortschatz braucht: ein Befund dort
+ * beschreibt dieselbe Achse in dieselbe Richtung, nur ohne Zahl. Zwei Listen
+ * liefen auseinander, sobald jemand eine Formulierung ändert.
+ */
+export const DIRECTION: Record<Criterion, [string, string]> = {
   aspect: ['breiter', 'höher'],
   exposure: ['heller', 'dunkler'],
   warmth: ['wärmer', 'kühler'],
