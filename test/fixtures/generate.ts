@@ -390,3 +390,59 @@ export function farbraumBild(): Frame {
   }
   return f;
 }
+
+/**
+ * Graustufenfassung: r = g = b, also `saturation = 0` und `warmth = tint = 0`
+ * per Konstruktion.
+ *
+ * Dieselbe Luminanzgewichtung wie `luminance` in `frame.ts`, damit die
+ * Graufassung eines Bildes dessen Helligkeitsverteilung erbt und die
+ * Tonwertachsen vergleichbar bleiben. Gerundet wird sofort: nur ein
+ * ganzzahlig gleicher Wert auf allen drei Kanälen ergibt exakt neutrale Pixel,
+ * und exakt ist hier die Anforderung (Etappe 9).
+ */
+export function toGray(src: Frame): Frame {
+  const f = createFrame(src.width, src.height);
+  for (let p = 0; p < src.data.length; p += 4) {
+    const v = Math.round(
+      0.2126 * src.data[p]! + 0.7152 * src.data[p + 1]! + 0.0722 * src.data[p + 2]!,
+    );
+    f.data[p] = v;
+    f.data[p + 1] = v;
+    f.data[p + 2] = v;
+    f.data[p + 3] = src.data[p + 3]!;
+  }
+  return f;
+}
+
+/**
+ * Der Satz für Etappe 9: drei Graustufenbilder und ein farbiges.
+ *
+ * NICHT in `testSet()` aufnehmen und nicht mit ihm mischen — der §13-Satz ist
+ * die Abnahmegrundlage von A-01…A-04, und ein monochromes Bild verschöbe dort
+ * jeden Median auf `warmth`, `tint` und `saturation`.
+ *
+ * Der Aufbau ist so gewählt, dass beide Richtungen des Schadens aus
+ * `MESSUNG-ausreisser.md` (Befund 3) an ihm sichtbar werden:
+ *
+ * - Die drei Graufassungen unterscheiden sich nur in den Tonwerten (heller,
+ *   dunkler, flauer). Damit hat die Tonwertkurve etwas zu tun, während
+ *   Weißabgleich und Sättigung nichts zu korrigieren *hätten* — jede Farbe,
+ *   die nach der Angleichung in ihnen steht, ist frisch aufgelegt.
+ * - `M4` ist die farbige Basisszene. Sie ist in diesem Satz in der Minderheit
+ *   und wird vom Median der drei Graubilder Richtung Grau gezogen.
+ *
+ * `M2` skaliert alle drei Kanäle gleich und `M3` lässt die Sättigung bei 1,0:
+ * beide Operationen halten r = g = b, sonst wäre das Fixture selbst nicht mehr
+ * monochrom.
+ */
+export function monochromSet(): { id: string; label: string; frame: Frame }[] {
+  const base = baseScene();
+  const grau = toGray(base);
+  return [
+    { id: 'M1', label: 'sw Referenz', frame: grau },
+    { id: 'M2', label: 'sw dunkel', frame: scaleChannels(grau, 0.72, 0.72, 0.72) },
+    { id: 'M3', label: 'sw flau', frame: flatten(grau, 0.6, 1) },
+    { id: 'M4', label: 'farbig', frame: base },
+  ];
+}
