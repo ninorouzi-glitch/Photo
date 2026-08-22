@@ -1,0 +1,141 @@
+# PLAN.md — Etappen
+
+> Fahrplan für die Erweiterung. `CLAUDE.md` bleibt der verbindliche Vertrag über
+> Architektur, Tuning-Punkte und Regeln; hier steht nur, was in welcher
+> Reihenfolge gebaut wird und welche Entscheidungen dafür schon gefallen sind.
+>
+> Für Claude Code: diese Datei ersetzt jede Kontexterklärung im Chat. Der
+> Einstieg ist immer „lies `CLAUDE.md` und `PLAN.md`, dann Etappe N".
+
+## Das Ziel der Erweiterung
+
+1. Die Faktoren ergänzen, die für die Harmonie eines Bild-Sets zählen:
+   Weißabgleich, wahrgenommene Helligkeit, Schwarzpunkt, Kurvenform, Sättigung,
+   Farbstich in den Tonwertzonen. Nicht Schärfe, nicht Rauschen.
+2. Bilder erkennen, die nicht ins Set passen, in zwei Sorten:
+   - **Typ A, technischer Ausreißer** — weicht auf einer gemessenen Achse so
+     stark ab, dass die Angleichung ihn zwar korrigiert, aber mit sichtbaren
+     Kosten. Konsequenz: „prüf das Ergebnis genau".
+   - **Typ B, farblicher Ausreißer** — technisch einwandfrei, sieht nach der
+     Angleichung sauber aus, passt aber farblich nicht (ein Innenraumbild
+     zwischen neun Strandbildern). Nicht wegkorrigierbar. Konsequenz:
+     „überleg dir, das Bild zu tauschen".
+
+   Erkannte Ausreißer werden markiert. Pro Bild gibt es einen Schalter „Nicht in
+   die Zielwerte einrechnen": das Bild fließt nicht in die Zielwertbildung ein,
+   wird aber trotzdem korrigiert und bleibt im Export.
+
+## Erledigt
+
+- **Etappe 1 — Messung gehärtet.** Kanalweiser Clipping-Ausschluss für
+  Weißabgleich und Sättigung, gemeinsamer `MIN_CONTRAST`, entphaste
+  Palette-Stichprobe, Epsilon statt `+1` in `warmth`/`tint`, `MEASURE_INSET`
+  (zentrale 80 % der Fläche), `clippedRatio` und kanalweise CDFs.
+- **Etappe 2A — `tint` ist eine bewertete Achse.** Achtes Kriterium der
+  Befundmatrix, dokumentierte Erweiterung gegenüber §10, mit Genus-Feld und
+  Artikel-Helfer.
+- **Etappe 2B — Tonwertkurve präzisiert.** Zum Rand hin verjüngtes
+  Glättungsfenster, beidseitig interpolierte Inverse. Mittlerer Kurvenfehler
+  0,105 → 0,033.
+- **Etappe 3 — Sättigungsfaktor rechnet richtig um.** `f = r·ā / (1 − r + r·ā)`,
+  Deckel auf dem erreichten Verhältnis statt auf `f`, `MAX_SAT_FACTOR = 2.0`.
+  Restfehler unter 0,2 %.
+- **Etappe 3c — Farbgitter gebaut und verdrahtet** (`src/core/satgrid.ts`,
+  `satModels()` in `target.ts`, `derive()` in `store.ts`). 16³-Gitter,
+  Schätzung der Sättigung nach den Tabellen, Verlässlichkeitsmaß `w`, Quelle
+  **und** Ziel mit demselben `w` geblendet. Bei w = 1 bitgleich der Stand davor.
+
+Stand: `tsc` sauber, 142 Unit-Tests grün, `vite build` läuft.
+
+## Offen
+
+### Schritt 0 — zwei Lücken aus 3c schließen (klein, vor Etappe 5)
+
+- **A-01…A-04 laufen am Produktivpfad vorbei.** `test/acceptance.test.ts` ruft
+  `buildRecipe` ohne `SatModel`; die App fährt seit 3c mit. Die Abnahmekriterien
+  sind damit auf einem Pfad geprüft, den niemand mehr nimmt. Beide Pfade prüfen,
+  nicht den alten ersetzen.
+- **Kosten von `satModels()` je Slider-Tick sind unbeziffert.** `derive()` ruft
+  pro Bild `buildLuts` plus einen Gitterdurchlauf mit 4³ Stützstellen je
+  belegter Zelle. Die §13-Fixtures belegen nur 26…164 der 4096 Zellen, ein
+  echtes Foto ein Vielfaches davon. 150 ms pro Tick in Stage 03 ist eine harte
+  Grenze — also messen, bevor irgendetwas darauf aufbaut.
+
+### Etappe 5 — Ausreißererkennung, Rechenkern (`src/core/outlier.ts`)
+
+**Typ A** über den robusten modifizierten z-Score: `z = 0,6745·(x − median)/MAD`,
+Ausreißer bei `|z| > 3,5`. Vier Fallstricke, alle zwingend:
+
+- Der Median wird **frisch** berechnet, nicht aus `computeTarget` genommen — der
+  Zielwert ist kein Element der Messmenge (Ankerwahl!).
+- Pro Achse dasselbe Maß wie in `deviation.ts`: `warmth`, `tint` und `noise` als
+  Differenz, alle übrigen als log2-Verhältnis.
+- MAD kann 0 werden → Fallback auf die mittlere absolute Abweichung; ist auch die
+  0, gibt es keinen Ausreißer.
+- Bei sehr homogenen Sets erzeugen winzige Abweichungen riesige z-Scores.
+  Deshalb zusätzlich als **UND**-Bedingung die warn-Schwelle aus `THRESHOLDS`.
+- Unter 4 Bildern wird Typ A nicht ausgewertet.
+
+**Typ B** über das Farbgitter aus 3c: Bin-Vertreter durch dieselbe Operation
+schicken, die `apply.ts` ausführt (`sample(curve, i·g[c])`), Histogramm über die
+korrigierten Vertreter, Distanz zum binweisen Median-Histogramm des Sets, darauf
+wieder der MAD-z-Score. Kein separater Normalisierungsschritt für Belichtung und
+Weißabgleich — die Korrektur selbst ist die Normalisierung.
+
+Rückgabe pro Bild: Typ, Achse, z-Score, absolute Abweichung, fertig formulierter
+deutscher Klartext. **Keine EV-Werte nennen** — die `exposure`-Achse misst log2
+gammakodierter Mediane und ist gegenüber echten EV um rund Faktor 2,2 gestaucht.
+Qualitativ formulieren: „deutlich dunkler als das Set", „spürbar wärmer als die
+übrigen Bilder". Für die Grammatik den Artikel-Helfer aus Etappe 2A.
+
+Wichtigster Test: ein sauberes homogenes Set meldet **nichts**.
+
+### Etappe 6 — Ausreißer im UI, mit Ausschlussschalter
+
+Markierung in der Bildliste, nach Typ unterschieden, Klartext direkt daneben
+statt im Tooltip. `excludedFromTarget` ist Eingabezustand am Item, kein
+abgeleiteter. Mindestens `MIN_IMAGES` (2) Bilder müssen eingerechnet bleiben,
+sonst wird der Schalter deaktiviert — mit sichtbarer Begründung, nicht still.
+Beachten: nimmt man den stärksten Ausreißer heraus, kann ein anderes Bild zum
+Ausreißer werden. Statistisch korrekt, kann aber unruhig wirken.
+
+### Etappe 4 — Clipping-Guard (bewusst nach 5 und 6)
+
+Zwei Mechanismen, beide ohne Pixel-Durchlauf abschätzbar. Erstens: die
+Kanalfaktoren schieben Werte über den Rand, bevor die Kurve gefragt wird
+(`sample(curve, i·g[c])`) — abschätzbar als `1 − CDF_c(255/g)` aus den
+kanalweisen CDFs. Die Matching-Kurve selbst kann per Konstruktion nicht clippen.
+Zweitens: eine Ziel-CDF mit viel Masse am Rand bildet einen ganzen
+Eingangsbereich auf 0 ab. Gegenmittel unterschiedlich: bei Mechanismus 1 die
+Gains dämpfen, bei Mechanismus 2 die Kurvenstärke. `MAX_SAT_FACTOR` aus Etappe 3
+gehört hier hineingeführt.
+
+### Etappe 7 — Hauttonmaske (optional)
+
+Hautpixel aus der globalen Messung von `warmth`, `tint` und `saturation`
+ausschließen, damit ein Porträt vor einer warmen Wand nicht kühl korrigiert wird.
+Schwellwertbasiert im bestehenden gammakodierten sRGB, kein neuer Farbraum. Ab
+40 % Maskenanteil wird die Maske ignoriert.
+
+### Etappe 8 — Farbstich nach Tonwertbereichen (optional)
+
+Als kanalweise Kurven in die bestehenden LUTs gefaltet, kein zusätzlicher
+Pixel-Pass. Die Zonengrenzen gehören auf die **Ziel-CDF**, nicht auf `p10`/`p90`
+des Originals — die Matching-Kurve verteilt die Tonwerte um.
+
+## Wie gearbeitet wird
+
+- **Erst messen, dann ändern.** Bevor eine als schwach dokumentierte Stelle
+  repariert wird, wird beziffert, wie groß der Fehler tatsächlich ist. Dreimal
+  hat sich dabei gezeigt, dass die naheliegende Korrektur falsch gewesen wäre.
+- **Messmittel bleiben im Repo.** So sind `test/lut.test.ts`,
+  `test/saettigung.test.ts` und `test/gitter.test.ts` entstanden. Sie prüfen
+  gegen Material mit bekannter Wahrheit, nicht gegen den §13-Satz.
+- **Der §13-Satz ist für Konvergenz da, nicht für Präzision.** Für Messfixtures
+  gibt es `measurementSet()`, das nie in die Zielwertbildung gerät. Bild 03 trägt
+  mehr Nebenwirkungen, als sein Name sagt.
+- **Entscheidungen gehören als Wenn-dann in den Prompt.** Statt „miss und zeig
+  mir" besser „miss; liegt X über Y, brich ab, sonst bau weiter". Nur echte
+  Abbruchbedingungen kommen zurück. Berichtslänge vorgeben.
+- **Vor jeder Etappe committen.** Dann ist `git diff` immer exakt der Umfang der
+  laufenden Etappe.
