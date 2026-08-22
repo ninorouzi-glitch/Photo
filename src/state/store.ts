@@ -1,5 +1,5 @@
-import type { AppState, Deviations, ImageItem, Settings } from '../core/types.ts';
-import { computeTarget } from '../core/target.ts';
+import type { AppState, Deviations, ImageItem, SatModel, Settings } from '../core/types.ts';
+import { computeTarget, satModels } from '../core/target.ts';
 import { deviations } from '../core/deviation.ts';
 import { loadSettings, saveSettings } from './persist.ts';
 
@@ -19,22 +19,33 @@ export function createStore() {
     settings: loadSettings(),
     target: null,
     deviations: {},
+    satModel: {},
   });
 
   const listeners = new Set<Listener>();
 
   function derive(next: AppState): AppState {
-    if (next.items.length === 0) return { ...next, target: null, deviations: {} };
+    if (next.items.length === 0) return { ...next, target: null, deviations: {}, satModel: {} };
 
-    const anchor =
+    const anchorIndex =
       next.settings.reference === 'median'
-        ? null
-        : (next.items.find((i) => i.id === next.settings.reference)?.stats ?? null);
+        ? -1
+        : next.items.findIndex((i) => i.id === next.settings.reference);
+    const anchor = anchorIndex >= 0 ? next.items[anchorIndex]!.stats : null;
 
-    const target = computeTarget(next.items.map((i) => i.stats), anchor);
+    const stats = next.items.map((i) => i.stats);
+    const target = computeTarget(stats, anchor);
     const devs: Record<string, Deviations> = {};
     for (const item of next.items) devs[item.id] = deviations(item.stats, target);
-    return { ...next, target, deviations: devs };
+
+    // Die wirksamen Sättigungsgrößen sind abgeleitet wie `target` und
+    // `deviations` — sie hängen an den Tabellen und damit an der Stärke, also
+    // an jeder Änderung der Einstellungen (Abweichung Nr. 3).
+    const models = satModels(stats, target, next.settings, anchorIndex);
+    const satModel: Record<string, SatModel> = {};
+    next.items.forEach((item, i) => { satModel[item.id] = models[i]!; });
+
+    return { ...next, target, deviations: devs, satModel };
   }
 
   function emit() {

@@ -11,6 +11,68 @@ export type Frame = {
   height: number;
 };
 
+/**
+ * Grobes RGB-Gitter über dieselben Pixel wie `saturation`, 16 Bins je Kanal.
+ *
+ * Wozu: `saturation` misst das Bild, wie es hereinkommt. Der Sättigungsfaktor
+ * wird aber auf ein Bild angewendet, das Weißabgleich und Tonwertkurve schon
+ * durchlaufen hat — und ein Farbstich liest sich in (max−min)/max als
+ * Sättigung, die der Weißabgleich anschließend wegnimmt. Aus Randverteilungen
+ * ist das nicht zu rekonstruieren, aus einer gemeinsamen schon: das Gitter
+ * lässt sich durch dieselben Tabellen schicken, die `apply.ts` fährt.
+ *
+ * Ein verbreiteter Fehlschluss dazu: die Sättigung des Bildes kommt aus
+ * `satSums` und ist damit **exakt** — jedes Bin trägt die Summe der echten
+ * Pixelwerte, nicht eine aus dem Bin geschätzte Größe. Der Vertreter aus
+ * `sums` dient allein dazu, die Wirkung der Tabellen abzuschätzen, und dafür
+ * ist das Bin-**Mittel** richtig. (Für das Schätzen der Sättigung selbst wäre
+ * das Bin-Zentrum besser — gemessen: −21 % gegen −61 % Fehler an einem flauen
+ * Bild. Diese Messung betrifft eine andere Frage und gilt hier nicht.)
+ *
+ * Die Wirkung geht als **Verschiebung** auf die Summen der Zelle ein, nicht
+ * als Verhältnis s′/s: ein Verhältnis wächst bei fast neutralem Vertreter über
+ * jede Grenze (siehe `estimateAfterLuts`).
+ *
+ * Was das Gitter nicht kann: Innerhalb eines Bins wechselt für einen Teil der
+ * Pixel die Kanalreihenfolge, sobald die Kanäle unterschiedlich skaliert
+ * werden — welcher Kanal nach dem Weißabgleich der größte ist, hängt dann vom
+ * einzelnen Pixel ab und nicht mehr vom Bin. Ein feineres Gitter hilft dagegen
+ * nicht; 32³ ist an §13-Bild 03 nicht besser als 16³. Wie groß dieser Teil
+ * ist, schätzt `w` — und `satModels` blendet damit auf die Vor-LUT-Größe
+ * zurück, statt der Schätzung blind zu folgen.
+ *
+ * `counts` als Uint32, alles Übrige als Float32: das sind Aggregate für eine
+ * Schätzung, keine Pixelwerte. Float64 verdoppelte nur den Strukturklon vom
+ * Worker zum Hauptthread.
+ */
+export type ColorGrid = {
+  counts: Uint32Array; // 16³ Zellen
+  sums: Float32Array; // R, G, B je Zelle — der Vertreter
+  satSums: Float32Array; // Σ (max−min)/max je Zelle
+  satASums: Float32Array; // Σ a·(max−min)/max je Zelle, a = L/max
+};
+
+/**
+ * Die Sättigungsgrößen, mit denen der Faktor aus §9.5 tatsächlich rechnet.
+ *
+ * `Stats.saturation` ist und bleibt die Vor-LUT-Messung (§8.3) — sie steht in
+ * der Befundmatrix und im UI. Hier stehen die *wirksamen* Größen: aus dem
+ * Farbgitter geschätzt für das Bild nach Weißabgleich und Tonwertkurve, mit
+ * `w` gegen die Vor-LUT-Größe zurückgeblendet. `w` ist der Anteil, für den das
+ * Gitter die Schätzung nicht tragen kann; bei w = 1 steht hier wieder genau
+ * das, was vor dieser Umstellung dastand (Abweichung Nr. 3).
+ *
+ * `target` wird **mitgeblendet**, mit demselben w: sonst mischte der Median
+ * bei einem Set mit unterschiedlichen w die beiden Domänen, und die Garantie
+ * „nie schlechter als vorher" hielte nicht mehr.
+ */
+export type SatModel = {
+  saturation: number; // wirksames S des Bildes
+  satA: number; // wirksames ā
+  target: number; // wirksames Ziel-S
+  w: number; // 0…1, Anteil ohne verlässliche Schätzung
+};
+
 export type Stats = {
   aspect: number; // Breite / Höhe
   p01: number;
@@ -45,6 +107,7 @@ export type Stats = {
    * §8.3 und der Operation aus §9.5 (Herleitung bei `saturationFactor`).
    */
   satA: number; // 0…1
+  colorGrid: ColorGrid;
   sharpness: number; // kontrastnormiert
   noise: number; // kontrastnormiert
   palette: string[]; // 5 CSS-Farben
@@ -139,6 +202,7 @@ export type AppState = {
   settings: Settings;
   target: Stats | null; // aus items + settings.reference berechnet
   deviations: Record<string, Deviations>; // je ImageItem-id
+  satModel: Record<string, SatModel>; // je ImageItem-id, abgeleitet wie `target`
 };
 
 /** §15: Obergrenze auf Instagrams Carousel-Limit gesetzt. */

@@ -143,7 +143,8 @@ function draw(item: ImageItem, ctx: Ctx, w: number, h: number): HTMLCanvasElemen
   // als die Datei, die dabei herauskommt.
   const scale = previewScale();
   renderTo(canvas, item, state.target!, state.settings,
-    Math.round(w * scale), Math.round(h * scale), { reuseGeometry: true });
+    Math.round(w * scale), Math.round(h * scale),
+    { reuseGeometry: true, sat: state.satModel[item.id] });
   return canvas;
 }
 

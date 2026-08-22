@@ -87,31 +87,46 @@ aber es wirft bei einem 24-MP-Foto rund 97 % der Pixel weg, bevor Instagram
 überhaupt etwas davon sieht. Umgesetzt ist die volle Auflösung als Standard und
 1080 px als Wahl. Siehe `src/pipeline/render.ts`.
 
-## Zwei offene Vorbehalte
+## Offene Vorbehalte
 
-**Sättigung wird gemessen, bevor der Weißabgleich läuft.** Ein Farbstich liest
-sich in `(max−min)/max` als Sättigung: Testbild 03 (Blau × 1,35) misst 0,369 und
-ist kaum gesättigt. Der Weißabgleich nimmt den Stich weg — nach den LUTs steht
-dasselbe Bild bei 0,174 —, aber der Sättigungsfaktor wird gegen die 0,369
-gebildet und dann auf das entstichte Bild angewendet. Es wird ein zweites Mal
-entsättigt, auf 0,107. An synthetischen Stichen gemessen sinkt die Sättigung
-nach den LUTs um bis zu 58 %, im Extremfall kehrt sich die Aufgabe sogar um (vor
-den LUTs ist ein Verhältnis von 0,51 gefordert, danach eines von 1,21). Bei
-einem echten Set, dessen Bilder einander ohnehin ähneln, sind es rund 1 %.
+**Sättigung wird gemessen, bevor der Weißabgleich läuft — teilweise behoben.**
+Ein Farbstich liest sich in `(max−min)/max` als Sättigung: Testbild 03
+(Blau × 1,35) misst 0,369 und ist kaum gesättigt. Der Weißabgleich nimmt den
+Stich weg, aber der Sättigungsfaktor wurde gegen die 0,369 gebildet und dann auf
+das entstichte Bild angewendet — es wurde ein zweites Mal entsättigt.
 
-Die Umrechnung im nächsten Absatz behebt das nicht und macht es an einer Stelle
-sichtbarer, weil sich bisher zwei Fehler teilweise aufhoben: Der Faktor war zu
-schwach *und* er zielte auf einen aufgeblähten Messwert. Deshalb prüft A-02 die
-Sättigung weiter gegen einen Bruchteil der Ausgangsstreuung statt gegen die
-Schranke der übrigen Kriterien.
+Behoben ist das über das Farbgitter: `Stats.colorGrid` trägt 16³ Zellen über
+genau die Pixel, über die §8.3 mittelt. Der Vertreter jeder Zelle läuft durch
+dieselben Tabellen wie das Bild, und die dort gemessene Verschiebung geht auf
+die (exakt gemessenen) Summen der Zelle. So entsteht die Sättigung *nach* den
+Tabellen, ohne das Bild ein zweites Mal anzufassen. Gegen die Zählung am Pixel
+geprüft liegt die Schätzung über alle Fixtures höchstens 0,013 daneben
+(`test/gitter.test.ts`).
 
-Der Lösungsweg ist bekannt und gehört zu einer anderen Aufgabe: Sättigung ist
-aus Randverteilungen nicht rekonstruierbar, aus einer gemeinsamen schon.
-`palette()` baut bereits ein 8³-RGB-Gitter und wirft es weg; behält man dessen
-Zähler und Summen, lassen sich Sättigung und `satA` nach dem Weißabgleich aus
-512 Bin-Zentren schätzen. Dasselbe Gitter braucht die geplante
-Ausreißererkennung — beides gehört zusammen angegangen. Festgehalten in
-`src/core/apply.ts`.
+Vollständig ist die Rekonstruktion nicht, und das ist der Grund für `w`:
+innerhalb einer Zelle kann die Kanalreihenfolge kippen, sobald die Kanäle
+unterschiedlich skaliert werden, und für diesen Teil der Pixel steht der
+Vertreter nicht mehr. `w` ist dieser Anteil, sättigungsgewichtet und aus 4³
+Stützstellen je Zelle geschätzt; gerechnet wird mit
+
+    s_wirksam = (1−w)·s_nachLUT + w·s_vorLUT,   ā analog
+    t_wirksam = (1−w)·Ziel(s_nachLUT) + w·Ziel(s_vorLUT)
+
+Das Ziel wird mitgeblendet, sonst mischte der Median bei einem Set mit
+unterschiedlichen `w` die beiden Domänen. Bei `w = 1` steht damit bitgleich das
+Ergebnis von vor der Umstellung — die Umstellung kann kein Bild schlechter
+stellen. Gemessen am §13-Satz (Stärke 1 / 0,7): `w` = 0,30 · 0,34 · 0,58 · 0,66
+· 0,31, und die Spannweite der erreichten Sättigung über das Set fällt von 0,128
+auf 0,095 (bei 0,7 von 0,115 auf 0,081).
+
+Was bleibt: bei starkem Farbstich ist `w` gerade dort am größten, wo die
+Korrektur am meisten brächte. Bild 03 misst vor den LUTs 0,369, danach
+tatsächlich 0,120, geschätzt 0,124 — mit `w` = 0,58 wird daraus ein wirksames
+0,267, also gut die Hälfte des Weges. Zusätzlich bindet in diesem Fall der
+Deckel aus §9.5 (Verhältnis 0,65), sodass das Ergebnis sich kaum ändert. Deshalb
+prüft A-02 die Sättigung weiter gegen einen Bruchteil der Ausgangsstreuung statt
+gegen die Schranke der übrigen Kriterien. Festgehalten in `src/core/satgrid.ts`
+und `src/core/target.ts`.
 
 **Die Tonwertkurve trifft ihr Ziel nur näherungsweise**, auch bei Stärke 1.
 Zwei bauliche Gründe: Sie wird aus der Luma-CDF gebaut, aber über dieselbe

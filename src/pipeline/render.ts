@@ -1,4 +1,4 @@
-import type { Frame, ImageItem, Output, Settings, Stats } from '../core/types.ts';
+import type { Frame, ImageItem, Output, SatModel, Settings, Stats } from '../core/types.ts';
 import { IG_WIDTH } from '../core/types.ts';
 import { aspectOf, cropRect, type Rect } from '../core/crop.ts';
 import { applyRecipe, buildRecipe, type Recipe } from '../core/apply.ts';
@@ -104,6 +104,12 @@ function drawScaled(
 export type RenderOptions = {
   recipe?: Recipe;
   /**
+   * Die wirksamen Sättigungsgrößen aus dem Store (`satModels`). Fehlen sie,
+   * rechnet `buildRecipe` mit der reinen Vor-LUT-Messung — für die Vorschau
+   * und den Export gehören sie immer mit, sonst greift Abweichung Nr. 3.
+   */
+  sat?: SatModel;
+  /**
    * Den zugeschnittenen, skalierten Ausschnitt neben dem Ziel-Canvas aufheben
    * und wiederverwenden, solange sich Bild, Format, Zuschnitt und Größe nicht
    * ändern.
@@ -157,7 +163,7 @@ export function renderTo(
     drawScaled(ctx, item.bitmap, rect, width, height);
   }
 
-  const r = opts.recipe ?? buildRecipe(item.stats, target, settings);
+  const r = opts.recipe ?? buildRecipe(item.stats, target, settings, opts.sat);
   if (r.neutral) return; // A-03: bei Stärke 0 läuft keine Pixeloperation
 
   const img = ctx.getImageData(0, 0, width, height);

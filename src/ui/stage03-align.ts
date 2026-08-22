@@ -72,7 +72,7 @@ export function render(root: HTMLElement, ctx: Ctx): void {
       renderTo(
         pane.canvas, pane.item, s.target, s.settings,
         Math.round(size.width * scale), Math.round(size.height * scale),
-        { reuseGeometry: true },
+        { reuseGeometry: true, sat: s.satModel[pane.item.id] },
       );
       renderDevs(pane.devs, s.deviations[pane.item.id]!);
       updateCropHint(pane, aspectOf(s.settings));
@@ -113,7 +113,7 @@ export function render(root: HTMLElement, ctx: Ctx): void {
     renderTo(
       canvas, item, state.target!, state.settings,
       Math.round(size.width * scale), Math.round(size.height * scale),
-      { reuseGeometry: true },
+      { reuseGeometry: true, sat: state.satModel[item.id] },
     );
     renderDevs(devs, state.deviations[item.id]!);
     updateCropHint(pane, aspectOf(state.settings));

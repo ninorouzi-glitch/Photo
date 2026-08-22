@@ -1,4 +1,6 @@
-import type { Stats } from './types.ts';
+import type { SatModel, Settings, Stats } from './types.ts';
+import { emptyGrid, estimateAfterLuts } from './satgrid.ts';
+import { buildLuts } from './lut.ts';
 import { MIN_CONTRAST } from './types.ts';
 
 export function median(values: number[]): number {
@@ -62,8 +64,55 @@ export function computeTarget(stats: Stats[], anchor?: Stats | null): Stats {
     // Faktor rechnet mit dem ā des Quellbildes —, aber `target` ist ein
     // vollständiges `Stats` und bleibt es.
     satA: of((s) => s.satA),
+    // Kein Median über Gitter: das Ziel ist kein Bild, durch dessen Tabellen
+    // etwas zu schicken wäre. Der Faktor braucht das Gitter des Quellbildes.
+    colorGrid: emptyGrid(),
     sharpness: of((s) => s.sharpness),
     noise: of((s) => s.noise),
     palette: [],
   };
+}
+
+/**
+ * Die wirksamen Sättigungsgrößen je Bild (§9.5, Abweichung Nr. 3).
+ *
+ * Gemessen wird vor den Tabellen, gewirkt wird danach: ein Farbstich liest
+ * sich in (max−min)/max als Sättigung, die der Weißabgleich anschließend
+ * wegnimmt, und der Faktor entsättigt dann ein zweites Mal. Das Farbgitter
+ * schätzt, was von der Sättigung nach den Tabellen übrig ist; `w` sagt, wie
+ * weit diese Schätzung trägt. Geblendet wird beides mit demselben w:
+ *
+ *     s_wirksam = (1−w)·s_nachLUT + w·s_vorLUT
+ *     t_wirksam = (1−w)·Ziel(s_nachLUT) + w·Ziel(s_vorLUT)
+ *
+ * Das Ziel **muss** mitgeblendet werden. Bliebe es in einer Domäne, mischte
+ * der Median bei einem Set mit unterschiedlichen w Vor- und Nach-LUT-Größen,
+ * und ein Bild mit w = 1 bekäme ein anderes Ziel als vor der Umstellung — die
+ * Garantie „nie schlechter als vorher" hinge dann am Rest des Sets.
+ *
+ * `Ziel(...)` ist dieselbe Aggregation wie in `computeTarget`: der Median über
+ * das Set, oder bei Ankerwahl der Wert des Ankerbildes.
+ */
+export function satModels(
+  stats: Stats[],
+  target: Stats,
+  settings: Settings,
+  anchorIndex = -1,
+): SatModel[] {
+  const nach = stats.map((s) => estimateAfterLuts(s.colorGrid, buildLuts(s, target, settings)));
+  const zielNach = anchorIndex >= 0
+    ? nach[anchorIndex]!.saturation
+    : median(nach.map((e) => e.saturation));
+  const zielVor = target.saturation;
+
+  return stats.map((s, i) => {
+    const e = nach[i]!;
+    const w = e.w;
+    return {
+      saturation: (1 - w) * e.saturation + w * s.saturation,
+      satA: (1 - w) * e.satA + w * s.satA,
+      target: (1 - w) * zielNach + w * zielVor,
+      w,
+    };
+  });
 }

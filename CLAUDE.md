@@ -50,7 +50,8 @@ File → analyze.worker → decode.ts (createImageBitmap ×2: full + 640px)
                           ↓
                         core/stats.ts → Stats  ─┐
                                                 ├→ store.derive() → target + deviations
-                        core/target.ts ─────────┘        (median over the set, or an anchor image)
+                        core/target.ts ─────────┘        + satModel (deviation 3)
+                          ↓                              (median over the set, or an anchor image)
                           ↓
 UI stage 03/04 → render.ts → crop.ts → apply.ts/lut.ts → pixels
                           ↓
@@ -70,14 +71,22 @@ into the §9.5 operator (deviation 3b). The weighting is the point: a smooth sky
 sits at `a ≈ 0.97` and contributes almost nothing to the measured saturation, so
 it must not decide the mean. Unweighted, three quarters of the error stays.
 
-**Store** (`src/state/store.ts`) — one object, `subscribe`/`set`. `target` and
-`deviations` are *derived* on every mutation, never hand-maintained. That is why
+**Store** (`src/state/store.ts`) — one object, `subscribe`/`set`. `target`,
+`deviations` and `satModel` are *derived* on every mutation, never
+hand-maintained (`satModel` depends on the LUTs and therefore on the strength;
+`satModels()` for the whole set costs ~1 ms for 20 images, measured). That is why
 stage 03 changes show up in stage 04 with no "Apply" step. `setItems` replaces the
 list wholesale: stage 01 owns selection order, because the worker returns results in
 completion order, not selection order (F-01).
 
 **Worker** (`src/pipeline/`) — decode + measure off the main thread; the bitmap is
-transferred, not copied. `decode.ts` also emits the 640px preview blob, deliberately:
+transferred, not copied. So is `Stats.colorGrid` (16³ bins, ~96 kB per image,
+~1.9 MB for a full set of 20): its four buffers ride in the `postMessage`
+transfer list next to the bitmap, because a structured clone would otherwise
+allocate every one of them twice. `counts` is `Uint32Array` and everything else
+`Float32Array` — these are aggregates for an estimate, not pixel values;
+measured against a `Float64` grid the representative differs by at most 0.016
+code values and the resulting saturation by 8e-4. `decode.ts` also emits the 640px preview blob, deliberately:
 pointing an `<img>` at the original file decodes a 24MP JPEG on the main thread and
 froze the renderer in testing. Measurement was never the bottleneck; the preview was.
 
@@ -179,30 +188,55 @@ argument with it.
    default is now `output: 'original'`, which exports the crop at its native pixel
    size (a 1:1 blit, no resampling at all). `'1080'` remains as a user choice. Do not
    re-hardcode 1080 — `exportSize(ratio, output, source)` takes the source bitmap.
-3. **Saturation measured before the white balance runs** (`core/apply.ts`). A
-   colour cast reads as saturation in `(max−min)/max`: §13's image 03 (B × 1.35)
-   measures 0.369 and has almost none. The white balance removes the cast — after
-   the LUTs the same image sits at 0.174 — but the factor is built from the
-   *pre-LUT* stats and then applied to the de-cast image, so it desaturates a
-   second time (down to 0.107). Measured on synthetic casts the post-LUT
-   saturation drops by up to 58 %, and in the extreme the sign of the task flips
-   (r = 0.51 before the LUTs, 1.21 after). On a real set whose images already
-   look alike it is ≈1 %.
+3. **Saturation is measured before the white balance runs** (`core/apply.ts`) —
+   **partly repaired in 3c, and the repair carries its own reliability
+   measure.** A colour cast reads as saturation in `(max−min)/max`: §13's image
+   03 (B × 1.35) measures 0.369 and has almost none. The white balance removes
+   the cast, but the factor was built from the *pre-LUT* stats and then applied
+   to the de-cast image, so it desaturated a second time.
 
-   The conversion in point 3b does **not** fix this and makes it visible in one
-   §13 case, because until now two errors partly cancelled: the factor was too
-   weak, and it was aimed at an inflated measurement. That is why A-02 still
-   checks saturation against a fraction of the initial spread instead of the
-   `(1−s)·before` bound the other criteria carry — it comes out at 0.114 against
-   0.112, and the 2 % missing are this and the §9.5 cap on image 04, not the
-   metric.
+   `Stats.colorGrid` (16³ bins over exactly the pixels §8.3 averages) closes
+   most of that. Each cell's representative runs through the same LUTs the image
+   runs through, and the **shift** measured there is added to the cell's exactly
+   measured sums — not a ratio `s′/s`, which blows up for a near-neutral
+   representative (an image of near-ties was assigned saturations of 6.9 and
+   16.4 that way). Against the pixel-by-pixel count the estimate is at most
+   0.013 off across every fixture; the additive model beats the ratio (up to
+   0.038) and the bare representative amount (up to 0.018). `test/gitter.test.ts`
+   keeps that reference — do not delete it, it is the only thing standing
+   between the estimate and a silent drift.
 
-   The fix is known and belongs with another task, not here: saturation cannot be
-   reconstructed from marginal distributions, but it can from a joint one.
-   `palette()` already builds an 8³ RGB grid and throws it away. Keeping its
-   counts/sums lets saturation *and* `satA` be estimated after the white balance
-   from 512 bin centres. The planned outlier detection needs the same grid — the
-   two should be done together.
+   What the grid cannot do is decide, inside a cell, which channel ends up
+   largest once the channels are scaled differently. `w` is that share,
+   saturation-weighted, estimated on 4³ support points per cell, and
+   `satModels()` (`core/target.ts`) blends with it:
+
+       s_eff = (1−w)·s_afterLUT + w·s_beforeLUT,  ā likewise
+       t_eff = (1−w)·target(s_afterLUT) + w·target(s_beforeLUT)
+
+   **The target is blended too, and must stay that way**: otherwise the median
+   over a set with differing `w` mixes the two domains, and the guarantee that
+   `w = 1` reproduces the pre-3c result bit-for-bit only holds for the whole set
+   at once. `w` is deliberately conservative (uniform inside the cell, so it
+   errs high): over all fixtures it never undercuts the pixel count, at the
+   tightest by 0.035.
+
+   Numbers on the §13 set (strength 1 / 0.7): `w` = 0.30 · 0.34 · 0.58 · 0.66 ·
+   0.31; the spread of achieved saturation across the set falls from 0.128 to
+   0.095 (at 0.7 from 0.115 to 0.081). What remains is the strong-cast case,
+   where `w` is largest exactly where the correction would help most: image 03
+   measures 0.369 before the LUTs, truly 0.120 after, estimated 0.124 — with
+   `w` = 0.58 the effective value is 0.267, about half the way. There the §9.5
+   cap binds as well, so the result barely moves. That is why A-02 still checks
+   saturation against a fraction of the initial spread instead of the
+   `(1−s)·before` bound the other criteria carry.
+
+   `Stats.saturation` stays the pre-LUT measurement — it is what the report
+   matrix and the UI show. The post-LUT quantity is internal, lives in
+   `AppState.satModel`, and reaches `buildRecipe` as its optional fourth
+   argument. A call without it (every test that builds a recipe by hand) gets
+   the pre-3c behaviour.
+
 3b. **Saturation: §8.3 and §9.5 are different quantities** (`core/apply.ts`), and
    the factor converts one into the other. With `a = L/max` per pixel, `L + (c−L)·f`
    gives exactly `S′/S = f / (a + (1−a)·f)`, so `f = r·a / (1 − r + r·a)` for a
@@ -247,7 +281,13 @@ argument with it.
   never reach target computation**: a clipped band and a vignette are not photographs
   from the same post, and in the set they drag the median and the initial spread far
   enough that A-02's convergence bounds measure something other than convergence.
-- `test/acceptance.test.ts` — A-01…A-04 against `testSet()`.
+- `test/acceptance.test.ts` — A-01…A-04 against `testSet()`. It calls
+  `buildRecipe` without a `SatModel`, i.e. it measures the core path, not the
+  path the app takes since 3c.
+- `test/gitter.test.ts` — the colour grid against a pixel-by-pixel reference:
+  the post-LUT saturation and `w` (deviation 3). The reference lives in `test/`
+  on purpose — it costs a full pass over the image per slider tick, which is
+  exactly what the grid avoids.
 - `test/stats.test.ts` — the measurement fixes, each against its own fixture from
   `measurementSet()`.
 - `test/fixtures/write.test.ts` — writes both sets as PNGs to `test/fixtures/out/`

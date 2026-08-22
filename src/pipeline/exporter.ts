@@ -37,7 +37,7 @@ export async function renderAll(state: AppState): Promise<ExportedFile[]> {
     if (!item || !state.target) continue;
     const { width, height } = exportSize(aspect, state.settings.output, item.bitmap);
     const canvas = document.createElement('canvas');
-    renderTo(canvas, item, state.target, state.settings, width, height);
+    renderTo(canvas, item, state.target, state.settings, width, height, { sat: state.satModel[item.id] });
     const blob = await toJpeg(canvas, quality);
     canvas.width = 0;
     canvas.height = 0;

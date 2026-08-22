@@ -1,6 +1,7 @@
-import type { Frame, Stats } from './types.ts';
+import type { ColorGrid, Frame, Stats } from './types.ts';
 import { MEASURE_EDGE, MEASURE_INSET, MIN_CONTRAST } from './types.ts';
 import { createFrame, downscaleToEdge, luminanceMap } from './frame.ts';
+import { GRID_BINS, GRID_SHIFT, emptyGrid } from './satgrid.ts';
 
 /**
  * Messung nach PRD §8. Erwartet einen bereits auf 640 px skalierten Frame —
@@ -170,7 +171,7 @@ const CLIP_LOW = 5;
  * drin, solange kein Kanal anschlägt. Die Begründung oben, warum Shades-of-Grey
  * und nicht Grauwelt mit Sättigungsmaske, bleibt davon unberührt.
  */
-function channelsUsable(r: number, g: number, b: number): boolean {
+export function channelsUsable(r: number, g: number, b: number): boolean {
   const max = r > g ? (r > b ? r : b) : g > b ? g : b;
   const min = r < g ? (r < b ? r : b) : g < b ? g : b;
   return max < CLIP_HIGH && min > CLIP_LOW;
@@ -217,8 +218,8 @@ function whiteBalance(f: Frame, lum: Float32Array) {
 // ── §8.3 Sättigung ────────────────────────────────────────────────────────
 
 /**
- * Sättigung nach §8.3, und daneben `satA` — beides fällt in derselben Schleife
- * an.
+ * Sättigung nach §8.3, `satA` und das Farbgitter — alles drei in derselben
+ * Schleife, ohne zusätzlichen Durchlauf.
  *
  * `satA` ist das mittlere L/max, **mit der Sättigung des Pixels gewichtet**.
  * Es ist kein Bildmerkmal für die Anzeige, sondern der Umrechnungsfaktor
@@ -233,8 +234,10 @@ function whiteBalance(f: Frame, lum: Float32Array) {
  * Restfehler statt 0,01…0,19 % mit Gewichtung. Wer das zu einem schlichten
  * Mittelwert vereinfacht, holt Abweichung Nr. 3 größtenteils zurück.
  */
-function saturation(f: Frame, lum: Float32Array): { saturation: number; satA: number } {
+function saturation(f: Frame, lum: Float32Array): { saturation: number; satA: number; colorGrid: ColorGrid } {
   let sum = 0, n = 0, sumA = 0;
+  const colorGrid = emptyGrid();
+  const { counts, sums, satSums, satASums } = colorGrid;
   const d = f.data;
   for (let i = 0, p = 0; i < lum.length; i++, p += 4) {
     if (lum[i]! <= 20) continue;
@@ -246,9 +249,18 @@ function saturation(f: Frame, lum: Float32Array): { saturation: number; satA: nu
     if (max <= 0) continue;
     const min = r < g ? (r < b ? r : b) : g < b ? g : b;
     const s = (max - min) / max;
+    const a = lum[i]! / max;
     sum += s;
-    sumA += (lum[i]! / max) * s;
+    sumA += a * s;
     n++;
+
+    const k = (r >> GRID_SHIFT) * GRID_BINS * GRID_BINS + (g >> GRID_SHIFT) * GRID_BINS + (b >> GRID_SHIFT);
+    counts[k]! += 1;
+    sums[k * 3]! += r;
+    sums[k * 3 + 1]! += g;
+    sums[k * 3 + 2]! += b;
+    satSums[k]! += s;
+    satASums[k]! += a * s;
   }
   // Boden 1 für das entartete Bild (kein zulässiges Pixel, oder alles neutral):
   // a = 1 macht die Umrechnung in `saturationFactor` zur Identität, der Faktor
@@ -256,6 +268,7 @@ function saturation(f: Frame, lum: Float32Array): { saturation: number; satA: nu
   return {
     saturation: n === 0 ? 0 : sum / n,
     satA: sum <= 0 ? 1 : sumA / sum,
+    colorGrid,
   };
 }
 
@@ -353,6 +366,17 @@ export function sampleStep(width: number): number {
   return SAMPLE_STEPS.find((p) => width % p !== 0) ?? 1;
 }
 
+/**
+ * Eigenes Gitter, absichtlich nicht `Stats.colorGrid`.
+ *
+ * Die beiden beantworten verschiedene Fragen. Hier sind die häufigsten Farben
+ * des Bildes gesucht, **einschließlich** der geclippten und der ganz dunklen —
+ * ein Bild mit weißem Himmel hat Weiß in seiner Palette. `colorGrid` trägt
+ * dagegen genau die Pixel, über die §8.3 mittelt, mit denselben Ausschlüssen
+ * (lum > 20, `channelsUsable`); es beschreibt die Farbmessung, nicht das Bild.
+ * Auch die Abtastung unterscheidet sich: hier eine Stichprobe (§8.6 braucht
+ * keine Vollzählung), dort jedes Pixel der §8.3-Schleife.
+ */
 function palette(f: Frame): string[] {
   const counts = new Int32Array(512);
   const sums = new Float64Array(512 * 3);

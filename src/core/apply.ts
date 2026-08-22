@@ -1,4 +1,4 @@
-import type { Frame, Settings, Stats } from './types.ts';
+import type { Frame, SatModel, Settings, Stats } from './types.ts';
 import { luminance } from './frame.ts';
 import { buildLuts, isIdentity, type Luts } from './lut.ts';
 
@@ -59,11 +59,18 @@ const MAX_SAT_FACTOR = 2.0;
  *
  * `a` ist ein Mittelwert, die Beziehung in a ist nichtlinear — die Konvergenz
  * ist damit sehr genau, aber nicht exakt.
+ *
+ * `sat` sind die *wirksamen* Größen aus `satModels`: dieselben Zahlen, aber für
+ * das Bild nach Weißabgleich und Tonwertkurve geschätzt (Abweichung Nr. 3).
+ * Ohne `sat` — jeder direkte Aufruf ohne Store — bleibt es bei der reinen
+ * Vor-LUT-Messung, dem Stand vor dieser Umstellung.
  */
-function saturationFactor(s: Stats, t: Stats, strength: number): number {
-  if (s.saturation <= 0.001 || t.saturation <= 0.001) return 1;
-  const r = Math.max(0.65, Math.min(1.55, (t.saturation / s.saturation) ** strength));
-  const a = s.satA;
+function saturationFactor(s: Stats, t: Stats, strength: number, sat?: SatModel): number {
+  const von = sat ? sat.saturation : s.saturation;
+  const ziel = sat ? sat.target : t.saturation;
+  if (von <= 0.001 || ziel <= 0.001) return 1;
+  const r = Math.max(0.65, Math.min(1.55, (ziel / von) ** strength));
+  const a = sat ? sat.satA : s.satA;
   const nenner = 1 - r + r * a;
   // Nenner ≤ 0 heißt: dieses Verhältnis ist mit diesem Operator nicht
   // erreichbar (r ≥ 1/(1−a), bei a = 0,36 schon am Deckel 1,55). Dann gehört f
@@ -92,10 +99,10 @@ function sharpenAmount(s: Stats, t: Stats, strength: number): number {
   return Math.max(0, Math.min(0.85, amount));
 }
 
-export function buildRecipe(s: Stats, t: Stats, settings: Settings): Recipe {
+export function buildRecipe(s: Stats, t: Stats, settings: Settings, model?: SatModel): Recipe {
   const strength = settings.strength;
   const luts = buildLuts(s, t, settings);
-  const sat = settings.fixes.saturation && strength > 0 ? saturationFactor(s, t, strength) : 1;
+  const sat = settings.fixes.saturation && strength > 0 ? saturationFactor(s, t, strength, model) : 1;
   const grain = settings.fixes.grain && strength > 0 ? grainSigma(s, t, strength) : 0;
   const sharpen = settings.fixes.sharpen && strength > 0 ? sharpenAmount(s, t, strength) : 0;
 
