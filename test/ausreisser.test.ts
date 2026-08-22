@@ -1,10 +1,9 @@
 import { describe, expect, test } from 'vitest';
-import type { Frame, Settings, Stats } from '../src/core/types.ts';
-import { DEFAULT_SETTINGS } from '../src/core/types.ts';
+import type { Frame, Stats } from '../src/core/types.ts';
 import { analyzeFull } from '../src/core/stats.ts';
 import { computeTarget } from '../src/core/target.ts';
 import { MIN_SET, robustZ, typA, typB } from '../src/core/outlier.ts';
-import { baseScene, farbraumBild, scaleChannels, stripes, testSet } from './fixtures/generate.ts';
+import { addNoise, baseScene, farbraumBild, scaleChannels, stripes, testSet } from './fixtures/generate.ts';
 
 /**
  * Ausreißererkennung, Rechenkern (Etappe 5).
@@ -130,14 +129,34 @@ describe('robustZ', () => {
  * die Korrektur selbst ist die Normalisierung.
  */
 describe('Typ B — farbliche Ausreißer', () => {
-  const cfg = (strength: number): Settings => ({ ...DEFAULT_SETTINGS, strength });
-  const B = (set: Stats[], strength = 0.7) => typB(set, computeTarget(set), cfg(strength));
+  // Ohne `Settings`: Typ B misst immer bei voller Angleichung (siehe `typB`).
+  const B = (set: Stats[]) => typB(set, computeTarget(set));
 
   test('ein homogenes Set meldet nichts', () => {
     const set = homogenesSet();
-    expect(B(set, 0.7).map((a) => `${a.index} z=${a.z.toFixed(1)} d=${a.value.toFixed(3)}`))
+    expect(B(set).map((a) => `${a.index} z=${a.z.toFixed(1)} d=${a.value.toFixed(3)}`))
       .toEqual([]);
-    expect(B(set, 1).map((a) => a.index)).toEqual([]);
+  });
+
+  test('§13-Bild 03 ist ein technischer Fall, kein farblicher', () => {
+    // Der Blaustich ist wegzukorrigieren, also darf Typ B ihn nicht melden.
+    // Bei der eingestellten Stärke 0,7 täte er es (Abstand 0,607), bei voller
+    // Angleichung nicht mehr (0,202) — genau deshalb misst `typB` bei 1,0.
+    const set = testSet().map((x) => analyzeFull(x.frame));
+    expect(B(set).map((a) => a.index)).not.toContain(2);
+    expect(typA(set).map((a) => a.index)).toContain(2);
+  });
+
+  test('ein Set, das sich nur im Rauschen unterscheidet, meldet keinen Typ B', () => {
+    // Rauschen streut die Werte über Zellgrenzen und verbreitert damit die
+    // Farbverteilung, ohne dass eine einzige Farbe hinzukäme. Am §13-Satz
+    // gemessen trägt es 0,134 zum Abstand bei und bleibt damit unter
+    // MIN_FARBABSTAND; hier steht der Fall als Test.
+    const base = baseScene();
+    const set = [0, 4, 7, 10, 13].map((sigma, i) =>
+      analyzeFull(sigma === 0 ? base : addNoise(base, sigma, 7 + i)),
+    );
+    expect(B(set).map((a) => `${a.index} d=${a.value.toFixed(3)}`)).toEqual([]);
   });
 
   test('ein Bild aus einer anderen Farbwelt wird gemeldet', () => {

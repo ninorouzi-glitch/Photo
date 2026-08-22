@@ -1,5 +1,5 @@
 import type { ColorGrid, Criterion, Settings, Stats } from './types.ts';
-import { MIN_CONTRAST } from './types.ts';
+import { DEFAULT_SETTINGS, MIN_CONTRAST } from './types.ts';
 import { GRID_BINS, GRID_SHIFT } from './satgrid.ts';
 import { buildLuts, type Luts } from './lut.ts';
 import { CRITERIA, THRESHOLDS } from './deviation.ts';
@@ -259,6 +259,17 @@ function abstand(a: Float64Array, b: Float64Array): number {
   return s / 2;
 }
 
+/**
+ * Die Einstellung, unter der Typ B misst: volle Stärke, Weißabgleich und
+ * Tonwertkurve an. Sättigung, Korn und Schärfe stehen hier nur der
+ * Vollständigkeit halber — `buildLuts` liest sie nicht.
+ */
+const VOLLE_ANGLEICHUNG: Settings = {
+  ...DEFAULT_SETTINGS,
+  strength: 1,
+  fixes: { ...DEFAULT_SETTINGS.fixes, tone: true, wb: true },
+};
+
 function textB(index: number): string {
   return (
     `Bild ${index + 1} passt farblich nicht zu den übrigen Bildern. Belichtung und ` +
@@ -283,18 +294,32 @@ function textB(index: number): string {
  * ein Bild, das der Farbwelt des Sets *näher* liegt als alle anderen, ist kein
  * Ausreißer.
  *
- * Die beiden Typen schließen einander nicht aus, und das ist kein Fehler: der
- * Abstand wird am **korrigierten** Bild gemessen, und die Korrektur läuft mit
- * der eingestellten Stärke. §13-Bild 03 (B × 1,35) misst bei Stärke 0,7 einen
- * Abstand von 0,64 und bei 1,0 noch 0,47 — der Rest des Farbstichs steht dann
- * eben auch im Export. Wer beides meldet, meldet nichts Falsches; welcher
- * Hinweis vorn steht, entscheidet Etappe 6.
+ * **Gemessen wird bei voller Stärke, nicht bei der eingestellten.** Typ B
+ * beantwortet eine einzige Frage: bleibt dieses Bild farblich fremd, *auch
+ * wenn* die Angleichung alles tut, was sie kann? Läuft die Rechnung mit einer
+ * zurückgedrehten Stärke, misst der Abstand den Rest einer Korrektur, die der
+ * Benutzer selbst weggeregelt hat — und meldet damit als „nicht
+ * wegzukorrigieren", was mit einem Schieberegler zu beheben wäre. Am §13-Satz
+ * ist das kein Randfall: Bild 03 (B × 1,35) kommt bei Stärke 0,7 als Typ B
+ * durch und bei 1,0 nicht mehr. Deshalb steht `Settings` auch nicht in der
+ * Signatur — es gäbe nichts daran einzustellen.
+ *
+ * Was das Maß nicht trennen kann, ist Farbe von **Bildausschnitt**: die
+ * Verteilung zählt, welche Farbbereiche wie oft vorkommen, und ein anderer
+ * Ausschnitt derselben Szene zeigt andere Anteile davon. Am §13-Satz gemessen,
+ * je gegen den Median der übrigen vier Bilder und bei voller Stärke: allein der
+ * Ausschnitt von Bild 05 kommt auf 0,731, allein die Weichzeichnung auf 0,110,
+ * allein das Rauschen auf 0,134 — die Grundszene selbst liegt bei 0,102. Bild
+ * 05 wird also gemeldet, und zwar wegen seines Ausschnitts. Für ein Carousel
+ * ist das nicht einmal falsch (ein Bild, das einen ganz anderen Teil der Szene
+ * zeigt, fällt auf), aber es ist nicht das, was Typ B verspricht. Der Fall ist
+ * beziffert und offen, nicht stillschweigend repariert.
  */
-export function typB(stats: Stats[], target: Stats, settings: Settings): Ausreisser[] {
+export function typB(stats: Stats[], target: Stats): Ausreisser[] {
   if (stats.length < MIN_SET) return [];
 
   const verteilungen = stats.map((s) =>
-    farbVerteilung(s.colorGrid, buildLuts(s, target, settings)),
+    farbVerteilung(s.colorGrid, buildLuts(s, target, VOLLE_ANGLEICHUNG)),
   );
 
   const mitte = new Float64Array(GRID_BINS ** 3);
