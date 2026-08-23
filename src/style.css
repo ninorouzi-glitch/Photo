@@ -96,6 +96,8 @@ main { max-width: 1180px; margin: 0 auto; padding: 0 var(--pad) 5rem; }
 
 h2 { font-size: 1.05rem; font-weight: 600; margin: 2rem 0 0.35rem; }
 h2:first-child { margin-top: 0.5rem; }
+/* Zwischenüberschrift innerhalb eines Abschnitts, z. B. „Fällt aus der Reihe“ im Klartext. */
+h3.sub-head { font-size: 0.95rem; font-weight: 600; margin: 1.25rem 0 0.35rem; }
 .sub { margin: 0 0 1rem; color: var(--text-dim); font-size: 0.9rem; max-width: 62ch; }
 
 /* Ampelfarben gelten überall gleich — Matrix, Abweichungsliste, Legende. */

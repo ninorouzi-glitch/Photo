@@ -1,6 +1,7 @@
 import { CRITERIA } from '../core/deviation.ts';
 import { ALL_CLEAR, CRITERION_LABEL, blurWarning, findings, formatValue, lesson } from '../core/copy.ts';
 import type { Ctx } from './ctx.ts';
+import { typA } from '../core/outlier.ts';
 import { clear, el, sentenceWithBoldLead } from './dom.ts';
 
 export function render(root: HTMLElement, ctx: Ctx): void {
@@ -48,6 +49,23 @@ export function render(root: HTMLElement, ctx: Ctx): void {
       list.appendChild(li);
     }
     root.append(list);
+  }
+
+  // ── Ausreißer, Typ A (Etappe 5) ──
+  // Vorabanzeige des Rechenkerns: nur Klartext, unter den vorhandenen Befunden.
+  // Markierung in der Bildliste und der Schalter „nicht in die Zielwerte
+  // einrechnen" bleiben Etappe 6. `typA` rechnet aus den Stats, die hier
+  // ohnehin vorliegen, und die Berichtsstage läuft nicht je Slider-Tick.
+  const ausreisser = typA(items.map((it) => it.stats));
+  if (ausreisser.length > 0) {
+    const liste = el('ul', { class: 'findings' });
+    for (const a of ausreisser) {
+      const status = a.criterion ? devs[a.index]![a.criterion].status : 'warn';
+      const li = el('li', { class: status === 'crit' ? 'crit' : 'warn' });
+      li.appendChild(sentenceWithBoldLead(a.text));
+      liste.appendChild(li);
+    }
+    root.append(el('h3', { class: 'sub-head', text: 'Fällt aus der Reihe' }), liste);
   }
 
   // ── F-09 Nicht-reparierbares ──
