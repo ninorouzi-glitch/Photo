@@ -157,6 +157,30 @@ die Zielwertbildung ein, sonst ziehen sie den Median.
 Die Schwelle legt das Material nahe: die schwarzweißen Bilder messen 0,000 bis
 0,030, die farbigen ab 0,32. Dazwischen liegt eine Größenordnung Luft.
 
+**Nachtrag: die Sättigungshöhe allein trennt nicht.** Die Luft im Material ist
+nicht die Luft in den Fixtures. §13-Bild 04 „flau" ist ein farbiges Bild — die
+Basisszene mit 45 % Chroma — und misst 0,0297, liegt also mitten im Band der
+schwarzweißen Bilder. Eine Schwelle, die 0,030 noch erfasst, erklärt Bild 04
+zum Schwarzweißbild und verschiebt den §13-Satz (Ziel-`saturation` 0,1235 →
+0,1430, Sättigungsfaktor von Bild 04 1,6075 → 1,000). p95 und p99 der
+Pixelsättigung und der Anteil der Pixel über 0,1 trennen ebenfalls nicht: Bild
+04 misst dort 0,102 / 0,116 / 5,6 %, ein Schwarzweißbild mit Chroma-Spur
+0,107 / 0,157 / 6,1 %. Was trennt, ist die **Richtung** der Chroma, nicht ihre
+Höhe: sättigungsgewichtet über das Farbgitter liegt die Richtungskonzentration
+von §13-04 bei 0,280, die zweier getonter Schwarzweißbilder bei 0,954 und
+0,996. Die Erkennung in Etappe 9 nimmt dieses zweite Merkmal deshalb dazu.
+
+Gerechnet wird es je belegter Zelle aus dem Bin-Vertreter — `a = r − (g+b)/2`,
+`b = (√3/2)·(g − b)`, `L = hypot(a, b)`, Gewicht `w = counts · sat(Zelle)` —, als
+Länge des gewichteten Mittels der Einheitsrichtungen: `chromaR = hypot(Σw·a/L,
+Σw·b/L) / Σw`, bei `Σw = 0` gleich 1. Das kostet keinen weiteren
+Pixel-Durchlauf, das Gitter liegt aus 3c schon vor. Damit lautet die Regel
+`sat ≤ EPS ∨ (sat ≤ BAND ∧ chromaR ≥ R_MIN)`; reines Grau hat ein beliebiges
+`chromaR` und wird über den ersten Zweig erfasst. Zu messen, bevor die
+Konstanten festgeschrieben werden: eine flaue Szene mit einheitlichem Farbstich
+— Nebel, Schnee, weiße Wand im Abendlicht — fällt womöglich in dieselbe Ecke und
+verliert dabei ihren Weißabgleich.
+
 ## Was aus der Messung an Material im Repo bleibt
 
 Nichts von diesem Material darf ins Repo — es sind fremde und private Fotos. Was

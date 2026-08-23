@@ -65,12 +65,46 @@ Bilder in beide Richtungen (`MESSUNG-ausreisser.md`, Befund 3):
   seine Bilder tatsächlich bei 0,030, 0,023 und 0,000 liegen. Die Befundmatrix
   meldet dort heute Unsinn, und die Ausreißererkennung erbt den Fehler.
 
-Vorgehen: Bilder unter einer kleinen Sättigungsschwelle gelten als **monochrom**.
-Für sie entfallen Weißabgleich und Sättigungsfaktor; Belichtung und Tonwertkurve
-laufen normal weiter, denn die binden sie an den Satz. Auf `warmth`, `tint` und
-`saturation` gehen sie nicht in die Zielwertbildung ein, sonst ziehen sie den
-Median. Die Schwelle legt das Material nahe: schwarzweiße Bilder messen 0,000 bis
-0,030, farbige ab 0,32 — dazwischen liegt eine Größenordnung Luft.
+Vorgehen: Bilder, die als **monochrom** gelten, verlieren Weißabgleich und
+Sättigungsfaktor; Belichtung und Tonwertkurve laufen normal weiter, denn die
+binden sie an den Satz. Auf `warmth`, `tint` und `saturation` gehen sie nicht in
+die Zielwertbildung ein, sonst ziehen sie den Median.
+
+**Eine Schwelle allein auf `Stats.saturation` reicht dafür nicht** — die
+ursprüngliche Festlegung ist an §13-Bild 04 „flau" gescheitert. Es ist ein
+farbiges Bild (die Basisszene mit 45 % Chroma) und misst 0,0297, liegt also im
+Band echter Schwarzweißbilder (0,000…0,030). Eine Schwelle, die Schwarzweiß
+vollständig erfasst, erklärt Bild 04 zum Schwarzweißbild und verschiebt damit
+den §13-Satz. Auch p95/p99 der Pixelsättigung und der Anteil der Pixel über 0,1
+trennen die beiden nicht.
+
+Stattdessen kommt ein **zweites Merkmal** dazu: die sättigungsgewichtete
+**Richtungskonzentration der Chroma** (`chromaR`), aus dem vorhandenen Farbgitter
+(`Stats.colorGrid`) und damit ohne zusätzlichen Pixel-Durchlauf. Der Gedanke
+dahinter ist der Unterschied, den die Sättigungshöhe nicht sieht: ein getontes
+Schwarzweißbild hat *eine* Chroma-Richtung, ein flaues Farbbild trägt die
+Farbtöne seiner Szene.
+
+Je belegter Zelle, vom Bin-Vertreter:
+
+```
+a = r − (g+b)/2        b = (√3/2)·(g − b)        L = hypot(a, b)
+w = counts · sat(Zelle)
+X += w·a/L             Y += w·b/L                W += w
+
+chromaR = hypot(X, Y) / W          (bei W = 0: 1)
+```
+
+An echtem Material gemessen liegt §13-04 bei `chromaR` = 0,280, getontes
+Schwarzweiß bei 0,954 und 0,996 — bei praktisch gleicher Sättigung. Reines Grau
+(`sat` = 0,000) hat ein beliebiges `chromaR`; dort entscheidet die Sättigung
+allein.
+
+Regel: **monochrom, wenn `sat ≤ EPS`, oder `sat ≤ BAND` und `chromaR ≥ R_MIN`.**
+
+Offener Punkt, vor dem Festschreiben der Konstanten zu messen: eine flaue Szene
+mit einheitlichem Farbstich — Nebel, Schnee — könnte in dieselbe Ecke fallen und
+dabei ihren Weißabgleich verlieren.
 
 Tests: ein rein schwarzweißer Satz bleibt nach der Angleichung neutral, ein
 Farbbild in einem solchen Satz bleibt farbig.
